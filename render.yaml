@@ -1,0 +1,49 @@
+services:
+  - type: web
+    name: bahikhata-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /openapi.json
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: PAYPAL_BASE_URL
+        value: https://api-m.sandbox.paypal.com
+      - key: APP_TIMEZONE
+        value: Asia/Kolkata
+      - key: REMINDER_GAP_DAYS
+        value: "3"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: SENDER_NAME
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+      - key: FRONTEND_ORIGIN
+        sync: false
+
+  - type: web
+    name: bahikhata-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        sync: false
