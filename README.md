@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # BahiKhata
 
 The AI invoicing assistant. Paste your client notes and BahiKhata fills in a PayPal invoice, tracks when it is paid, and writes the reminder when it is not.
@@ -127,3 +128,6 @@ These run against in-memory stand-ins for Supabase, PayPal and OpenAI. They cove
 - **Sandbox by default.** For live money set `PAYPAL_BASE_URL` to `https://api-m.paypal.com` and use live credentials.
 - **Reminders are PayPal emails.** The AI text appears inside PayPal's reminder, which adds the pay button.
 - **Legal pages are drafts.** The Privacy Policy and Terms describe how the app really works, but have a lawyer review them before real customers use it.
+=======
+# BahiKhata-The-AI-invoicing-assistant
+>>>>>>> 2beafd2ce0cbfbcd66ba1cd35a63730bc0d1c118
