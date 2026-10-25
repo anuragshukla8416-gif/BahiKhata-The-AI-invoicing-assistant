@@ -236,18 +236,10 @@ export default function Ledger() {
   const load = useCallback(
     () =>
       api("/api/invoices")
-  .then((response) => {
-    const invoices = Array.isArray(response)
-      ? response
-      : Array.isArray(response?.invoices)
-        ? response.invoices
-        : Array.isArray(response?.data)
-          ? response.data
-          : [];
-
-    setRows(invoices);
-    setError("");
-  })
+        .then((response) => {
+          setRows(response);
+          setError("");
+        })
         .catch((e) => {
           setError(e.message);
           throw e;
