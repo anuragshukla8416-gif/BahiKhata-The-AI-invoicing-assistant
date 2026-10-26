@@ -1,85 +1,95 @@
 # BahiKhata — The AI Invoicing Assistant
 
-BahiKhata helps freelancers turn client notes into PayPal invoices, track payments, and send AI-assisted payment reminders for overdue invoices.
+**Turn client notes into invoices. Track payments. Follow up automatically.**
+
+BahiKhata is an AI-powered invoicing assistant designed to help freelancers and small businesses create PayPal invoices from natural-language notes, track payment status, and follow up on overdue invoices with AI-assisted reminders.
 
 Built by Anurag Shukla for the PayPal AI Hackathon.
 
-## Features
+## ✨ Features
 
-* **AI-powered invoice creation:** Convert natural-language client notes into structured invoice details.
-* **PayPal integration:** Create invoice drafts, send invoices, and issue payment reminders through PayPal.
-* **Invoice ledger:** View invoices and track their payment status.
-* **Payment tracking:** Process PayPal webhooks to update invoice statuses.
-* **AI-assisted reminders:** Generate reminder messages based on how overdue an invoice is.
-* **Automated follow-ups:** Chase overdue invoices with reminder limits and configurable intervals.
-* **Tax support:** Specify a tax rate and tax label for invoice line items.
-* **Responsive interface:** Manage invoices through a React-based web application.
+* **AI-Powered Invoice Creation:** Convert natural-language client notes into structured invoice details using Google Gemini.
+* **PayPal Invoicing:** Create invoice drafts and send invoices through the PayPal Invoicing API.
+* **Invoice Ledger:** View invoices and track their payment status from a centralized dashboard.
+* **Payment Tracking:** Process PayPal webhooks to synchronize invoice statuses.
+* **AI-Assisted Reminders:** Generate payment reminder messages based on how overdue an invoice is.
+* **Automated Follow-Ups:** Process overdue invoices with configurable reminder intervals and limits.
+* **Tax Support:** Specify tax rates and tax labels for invoice line items.
+* **Responsive Interface:** Manage invoices through a modern React-based web application.
 
-## Architecture
+## 🛠️ Technology Stack
+
+| Component          | Technology                   |
+| ------------------ | ---------------------------- |
+| Frontend           | React, Vite, Tailwind CSS    |
+| Invoice Ledger     | AG Grid                      |
+| Backend            | Python, FastAPI              |
+| AI Model           | Google Gemini 3.1 Flash Lite |
+| Database           | Supabase PostgreSQL          |
+| Payment Processing | PayPal Invoicing API         |
+| Deployment         | Vercel and Render            |
+
+## 🏗️ Architecture
 
 ```mermaid
 flowchart LR
     U[Freelancer] --> FE[React Frontend]
     FE --> API[FastAPI Backend]
-    API --> AI[AI Service]
+    API --> AI[Gemini 3.1 Flash Lite]
+    API <--> DB[(Supabase PostgreSQL)]
     API --> PP[PayPal Invoicing API]
     PP -->|Webhooks| API
-    API <--> DB[(Supabase PostgreSQL)]
     CRON[Daily Scheduler] -->|POST /api/chase-overdue| API
 ```
 
-## Technology Stack
-
-| Component              | Technology                                       |
-| ---------------------- | ------------------------------------------------ |
-| Frontend               | React, Vite, Tailwind CSS                        |
-| Invoice ledger         | AG Grid                                          |
-| Backend                | Python, FastAPI                                  |
-| Database               | Supabase PostgreSQL                              |
-| Payments and invoicing | PayPal Invoicing API                             |
-| AI                     | AI service configured in the backend             |
-| Deployment             | Vercel/Render, depending on the deployed service |
-
-## Project Structure
+## 📁 Project Structure
 
 ```text
-schema.sql              Supabase database schema
-backend/main.py         FastAPI backend
-backend/test_main.py    Backend tests
-frontend/src/           Frontend application
-frontend/ui.test.jsx    Frontend interface tests
-render.yaml             Render deployment configuration
+BahiKhata/
+├── backend/
+│   ├── main.py
+│   ├── test_main.py
+│   ├── requirements.txt
+│   └── .env.example
+├── frontend/
+│   ├── src/
+│   ├── public/
+│   ├── package.json
+│   └── ui.test.jsx
+├── schema.sql
+├── render.yaml
+└── README.md
 ```
 
-## Getting Started
+## 🚀 Getting Started
 
 ### Prerequisites
 
 * Python 3.11 or newer
 * Node.js 18 or newer
-* A Supabase project
-* A PayPal Developer account and sandbox application
-* An API key for the AI provider configured in the backend
+* A Supabase account
+* A PayPal Developer account
+* An API key for Google Gemini
 
-### 1. Set Up Supabase
+### 1. Configure Supabase
 
 1. Create a Supabase project.
-2. Open the SQL Editor.
-3. Run the project's `schema.sql`.
-4. Copy the project URL and the required service key from your Supabase project settings.
+2. Open the SQL Editor in your project dashboard.
+3. Execute the SQL statements in `schema.sql`.
+4. Obtain your project URL and the required service key from the project settings.
 
-Keep service-role credentials private. Never expose them in frontend code or commit them to GitHub.
+**Security:** Keep your service key private. Never expose it in frontend code or commit it to a public repository.
 
-### 2. Configure PayPal
+### 2. Configure PayPal Sandbox
 
-1. Sign in to the PayPal Developer Dashboard.
+1. Open the PayPal Developer Dashboard.
 2. Create a sandbox application.
-3. Copy its client ID and secret.
-4. Keep the credentials available for the backend configuration.
+3. Copy the sandbox client ID and secret.
+4. Keep these credentials for the backend configuration.
 
 ### 3. Configure the Backend
 
-Open a terminal at the project root:
+From the project root, open a terminal and run:
 
 ```bash
 cd backend
@@ -100,13 +110,13 @@ Activate the virtual environment.
 source .venv/bin/activate
 ```
 
-Install dependencies:
+Install the dependencies:
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-Copy the example environment file:
+Create your environment file.
 
 **Windows PowerShell:**
 
@@ -120,7 +130,7 @@ Copy-Item .env.example .env
 cp .env.example .env
 ```
 
-Fill in the required variables in `.env`, using the names documented in `backend/.env.example`. These may include the AI API key, Supabase credentials, PayPal sandbox credentials, frontend origin, and cron secret.
+Populate `.env` using the variable names in `backend/.env.example`. Configure the required Gemini API key, Supabase credentials, PayPal sandbox credentials, frontend origin, and cron secret.
 
 Start the backend:
 
@@ -128,7 +138,9 @@ Start the backend:
 uvicorn main:app --reload
 ```
 
-The backend should be available at `http://localhost:8000`.
+The API should be available at:
+
+`http://localhost:8000`
 
 ### 4. Configure the Frontend
 
@@ -140,43 +152,68 @@ npm install
 npm run dev
 ```
 
-Open the local development URL printed by Vite, typically `http://localhost:5173`.
+Open the development URL printed by Vite, typically:
 
-Configure the frontend API URL according to the project's environment setup. For local development, ensure requests reach the local FastAPI backend.
+`http://localhost:5173`
+
+Ensure the frontend's API configuration points to the local FastAPI backend.
 
 ### 5. Configure PayPal Webhooks
 
 PayPal requires a publicly accessible webhook endpoint.
 
-1. Deploy the backend or expose the local backend through a secure development tunnel.
-2. Register the public endpoint ending in `/webhooks/paypal` in your PayPal sandbox application.
-3. Subscribe to the invoice events supported by the backend.
-4. Configure the webhook ID in the backend environment variables.
+1. Deploy the backend or expose it through a secure development tunnel.
+2. Open your PayPal sandbox application.
+3. Register the public endpoint ending in `/webhooks/paypal`.
+4. Subscribe to the invoice events supported by the backend.
+5. Configure the resulting webhook ID in the backend environment.
 
-**Security:** Do not disable webhook signature verification in a deployed environment. Any verification bypass should be restricted to controlled local testing.
+**Important:** Keep webhook signature verification enabled in deployed environments. Any verification bypass should be restricted to controlled local testing.
 
-## Try the Main Workflow
+## 💡 Using BahiKhata
+
+### Create an Invoice
 
 1. Open the application.
-2. Enter client notes describing the client, work, prices, tax, and payment deadline.
-3. Use the AI parsing feature to populate the invoice form.
-4. Review and correct the generated details.
-5. Create an invoice draft through PayPal.
-6. Send the invoice to a PayPal sandbox buyer.
-7. Complete a sandbox payment and check that the invoice status updates.
-8. Test payment reminders using an overdue invoice.
+2. Enter natural-language notes describing the client, work performed, pricing, taxes, and payment deadline.
+3. Use the AI parsing feature to extract the invoice details.
+4. Review the generated information and correct anything necessary.
+5. Create the invoice draft through PayPal.
+6. Send the invoice to your client.
 
-For testing automated reminders, use a sandbox invoice and an appropriate test due date. Avoid modifying production invoice records merely to demonstrate the workflow.
+Example input:
 
-## Automatic Overdue Reminders
+```text
+Brand identity for Meera Shah (meera@studiokora.in),
+3 days at 8000 a day, plus 2500 for print files.
+18% GST, due in 15 days.
+```
 
-The backend provides:
+### Track Payments
+
+1. Open the invoice ledger.
+2. Review invoice details and payment statuses.
+3. Complete a payment using a PayPal sandbox buyer account.
+4. Verify that the corresponding webhook updates the invoice status.
+
+### Send Payment Reminders
+
+1. Select an eligible overdue invoice.
+2. Generate a payment reminder.
+3. Review and edit the reminder message.
+4. Send it through PayPal.
+
+For testing automated reminders, use a sandbox invoice with an appropriate overdue date.
+
+## 🔔 Automated Overdue Follow-Ups
+
+BahiKhata provides the following endpoint for processing overdue invoices:
 
 `POST /api/chase-overdue`
 
-The scheduler endpoint uses a cron secret for authorization. The implementation supports overdue-invoice selection, reminder limits, escalating reminder tone, and protection against duplicate sends.
+The backend supports configurable reminder intervals, reminder limits, escalation based on lateness, and protection against duplicate sends.
 
-To automate this endpoint, configure a trusted scheduler to send a POST request with the required `x-cron-secret` header.
+The endpoint requires the `x-cron-secret` header to match the configured `CRON_SECRET`.
 
 Example:
 
@@ -186,61 +223,68 @@ curl -X POST \
   https://YOUR-API-URL/api/chase-overdue
 ```
 
-Configure the scheduler frequency and reminder settings according to your environment.
+A trusted scheduler can call this endpoint periodically. Configure the schedule and timeout according to your hosting environment.
 
-## API Endpoints
+## 🔌 API Reference
 
-| Endpoint                           | Purpose                                              |
-| ---------------------------------- | ---------------------------------------------------- |
-| `POST /api/parse`                  | Convert client notes into structured invoice details |
-| `POST /api/invoices`               | Validate and create an invoice                       |
-| `POST /api/invoices/{id}/send`     | Send an invoice through PayPal                       |
-| `GET /api/invoices`                | Retrieve invoices and their status                   |
-| `POST /webhooks/paypal`            | Process PayPal invoice events                        |
-| `POST /api/invoices/{id}/followup` | Generate a payment reminder                          |
-| `POST /api/invoices/{id}/remind`   | Send a reminder through PayPal                       |
-| `POST /api/chase-overdue`          | Process overdue invoices for automated follow-up     |
+| Endpoint                           | Description                                                    |
+| ---------------------------------- | -------------------------------------------------------------- |
+| `POST /api/parse`                  | Convert natural-language notes into structured invoice details |
+| `POST /api/invoices`               | Validate and create an invoice                                 |
+| `POST /api/invoices/{id}/send`     | Send an invoice through PayPal                                 |
+| `GET /api/invoices`                | Retrieve invoices and payment information                      |
+| `POST /webhooks/paypal`            | Process PayPal invoice events                                  |
+| `POST /api/invoices/{id}/followup` | Generate an AI-assisted payment reminder                       |
+| `POST /api/invoices/{id}/remind`   | Send a reminder through PayPal                                 |
+| `POST /api/chase-overdue`          | Process overdue invoices for automated follow-up               |
 
-## Testing
+## 🧪 Testing
 
-Run the backend tests:
+### Backend Tests
+
+From the project root, activate your virtual environment and run:
 
 ```bash
 python -m pytest backend/test_main.py -v
 ```
 
-Run the frontend tests using the scripts configured in `frontend/package.json`.
+### Frontend Tests
 
-The repository includes tests for invoice validation, payment status handling, webhook processing, reminder behavior, tax calculations, and other application workflows.
+Run the test command configured in `frontend/package.json`.
 
-Test results can vary with environment configuration and mocked integrations. Passing automated tests does not, by itself, establish that every live PayPal, Supabase, and AI integration has been verified.
+The repository includes automated tests for invoice validation, payment status handling, webhook processing, reminder behavior, tax calculations, and other application workflows.
 
-## Deployment
+Test results depend on environment configuration and mocked integrations. Passing automated tests alone does not guarantee that every live integration has been verified.
+
+## 🌐 Deployment
 
 The frontend and backend can be deployed separately.
 
-Before deployment:
+Before deploying:
 
 1. Configure the required environment variables in the hosting provider.
 2. Set the frontend API URL to the deployed backend.
 3. Configure the backend's allowed frontend origins.
-4. Register the production webhook URL with the PayPal application.
-5. Confirm that webhook signature verification is enabled.
-6. Test invoice creation, sending, payment updates, and reminders in the sandbox.
+4. Register the deployed webhook URL in the PayPal application.
+5. Keep webhook signature verification enabled.
+6. Test invoice creation, sending, payment updates, and reminders using the sandbox.
 
-For custom domains, follow the hosting provider's DNS instructions and verify HTTPS before sharing the site.
+For custom domains, follow your hosting provider's DNS instructions and verify HTTPS before sharing the application.
 
-## Known Limitations
+## ⚠️ Known Limitations
 
-* **Authentication:** If authentication is not enabled, users may be able to access shared application data. Do not use the application for confidential customer data until access controls are implemented and verified.
-* **Sandbox payments:** Sandbox credentials are intended for testing. Live transactions require the appropriate live PayPal credentials and configuration.
-* **Tax compliance:** Tax labels and rates are invoice inputs. Users remain responsible for determining the tax treatment applicable to their transactions.
-* **Legal documents:** Privacy and terms pages should be reviewed before the application is used with real customers.
+* **Authentication:** If authentication is not enabled, application data may be accessible to other visitors. Access controls should be implemented and verified before handling confidential customer information.
+* **Sandbox Payments:** Sandbox credentials are intended for testing. Live transactions require appropriate PayPal live credentials and configuration.
+* **Tax Compliance:** Tax rates and labels are invoice inputs. Users are responsible for determining the applicable tax treatment.
+* **Legal Documents:** Privacy and terms pages should be reviewed before the application is used with real customers.
+* **AI Accuracy:** Generated invoice details and reminders should be reviewed before they are sent to clients.
 
-## AI Disclosure
+## 🤖 AI Disclosure
 
-BahiKhata uses an AI service to interpret natural-language invoice notes and assist with payment-reminder writing. The exact provider and model should match the backend configuration used in the submitted version.
+BahiKhata uses **Google Gemini 3.1 Flash Lite** to interpret natural-language invoice notes and assist with payment reminder generation.
 
-## License
+AI-generated information is presented for user review before invoices and reminders are sent.
+
+## 📄 License
 
 See the repository's `LICENSE` file for the applicable open-source license.
