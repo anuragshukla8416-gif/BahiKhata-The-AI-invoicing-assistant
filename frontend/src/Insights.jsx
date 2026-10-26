@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-
-const API = (
-  import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
-).replace(/\/+$/, "");
+import { api } from "./lib.js";
 
 function money(amount, currency) {
   try {
@@ -77,17 +74,10 @@ export default function Insights() {
     setError("");
 
     try {
-      const response = await fetch(`${API}/api/insights`);
-
-      if (!response.ok) {
-        throw new Error(`Could not load financial insights (${response.status})`);
-      }
-
-      setData(await response.json());
+      const res = await api("/api/insights");
+      setData(res);
     } catch (err) {
-      setError(
-        `${err.message}. Check that the backend is running and VITE_API_URL points to the correct backend.`
-      );
+      setError(err.message || "Could not load financial insights.");
     } finally {
       setLoading(false);
     }
@@ -98,15 +88,10 @@ export default function Insights() {
     setCashflowError("");
 
     try {
-      const response = await fetch(`${API}/api/cashflow`);
-
-      if (!response.ok) {
-        throw new Error(`Could not load the cash-flow outlook (${response.status})`);
-      }
-
-      setCashflow(await response.json());
+      const res = await api("/api/cashflow");
+      setCashflow(res);
     } catch (err) {
-      setCashflowError(err.message);
+      setCashflowError(err.message || "Could not load the cash-flow outlook.");
     } finally {
       setCashflowLoading(false);
     }
@@ -284,7 +269,7 @@ export default function Insights() {
 
                   <tbody>
                     {data.top_chase_candidates.map((item) => (
-                      <tr key={item.invoice_id}>
+                      <tr key={item.invoice_id || item.invoice_number}>
                         <td>{item.invoice_number}</td>
                         <td>{item.client_name}</td>
                         <td>{money(item.amount, item.currency)}</td>
@@ -317,7 +302,6 @@ export default function Insights() {
                 <p className="insight-muted">
                   Actionable suggestions to help you follow up on invoices and plan cash flow.
                 </p>
-
               </div>
 
               <span className="tag">
@@ -328,7 +312,7 @@ export default function Insights() {
             {data.insights?.length ? (
               <ol className="insight-recommendations">
                 {data.insights.map((item, index) => (
-                  <li key={`${index}-${item}`}>{item}</li>
+                  <li key={`${index}-${typeof item === 'string' ? item : index}`}>{typeof item === 'string' ? item : JSON.stringify(item)}</li>
                 ))}
               </ol>
             ) : (

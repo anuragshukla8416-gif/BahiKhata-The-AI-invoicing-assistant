@@ -29,7 +29,7 @@ export function Stroke({ label }) {
 const today = () => new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 
 export function InvoiceSheet({ invoice, number }) {
-  const { client_name, client_email, currency = "USD", tax_name = "GST", items, due_date, notes } = invoice;
+  const { client_name, client_email, currency = "USD", tax_name = "GST", items = [], due_date, notes } = invoice;
   const shown = items.filter((i) => i.name || Number(i.unit_price));
   const sum = totals(shown);
   const fmt = (n) => money(n, currency);
@@ -60,7 +60,7 @@ export function InvoiceSheet({ invoice, number }) {
         <div className="s-th num tx">{tax_name}</div>
         <div className="s-th num amt">Amount</div>
         {shown.map((i, n) => (
-          <div className="rowin" key={n} style={{ "--d": `${Math.min(n, 6) * 45}ms` }}>
+          <div className="rowin" key={`item-${n}-${i.name || 'row'}`} style={{ "--d": `${Math.min(n, 6) * 45}ms` }}>
             <div className="s-td">{i.name || <span className="ghost">Untitled line</span>}</div>
             <div className="s-td num">{Number(i.quantity) || 0}</div>
             <div className="s-td num">{fmt(Number(i.unit_price) || 0)}</div>
@@ -70,7 +70,7 @@ export function InvoiceSheet({ invoice, number }) {
         ))}
         {shown.length === 0 &&
           [0, 1].map((n) => (
-            <div className="rowin" key={n}>
+            <div className="rowin" key={`empty-${n}`}>
               <div className="s-td ghost">{n === 0 ? "Your line items appear here" : ""}</div>
               <div className="s-td" />
               <div className="s-td" />

@@ -40,7 +40,11 @@ export function longDate(iso) {
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
-const toCents = (x) => Math.round(Number((x * 100).toFixed(6)));
+// Safely converts floating numbers/strings to cents, guarding against NaN
+const toCents = (x) => {
+  const val = Number(x);
+  return Math.round(Number.isFinite(val) ? val * 100 : 0);
+};
 
 // mirrors the backend: each line is rounded to the cent, then its tax is rounded to the cent
 export function totals(items) {

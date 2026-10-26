@@ -8,7 +8,11 @@ import { Privacy, Terms } from "./Legal.jsx";
 import { Mark } from "./ui.jsx";
 import { CONTACT, Link, NavContext } from "./nav.jsx";
 
-const clean = (p) => (p.length > 1 ? p.replace(/\/+$/, "") : p);
+const clean = (p) => {
+  if (!p) return "/";
+  const pathOnly = p.split("?")[0].split("#")[0];
+  return pathOnly.length > 1 ? pathOnly.replace(/\/+$/, "") : pathOnly;
+};
 
 function Header({ path }) {
   const inApp = path.startsWith("/app");
@@ -159,7 +163,7 @@ export default function App() {
   }, [path]);
 
   const go = useCallback((to) => {
-    const next = clean(to.split("#")[0]);
+    const next = clean(to);
 
     window.history.pushState({}, "", to);
     setPath(next);

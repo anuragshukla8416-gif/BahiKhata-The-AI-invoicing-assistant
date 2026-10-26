@@ -29,7 +29,9 @@ function normalizeStatus(status) {
 }
 
 function StatusCell({ data }) {
-  const displayStatus = data.days_overdue > 0
+  if (!data) return null;
+
+  const displayStatus = (data.days_overdue || 0) > 0
     ? "OVERDUE"
     : normalizeStatus(data.status);
 
@@ -57,7 +59,7 @@ function StatusCell({ data }) {
         whiteSpace: "nowrap",
       }}
     >
-      {displayStatus === "OVERDUE" && data.days_overdue > 0
+      {displayStatus === "OVERDUE" && (data.days_overdue || 0) > 0
         ? `OVERDUE · ${data.days_overdue}d`
         : displayStatus.replaceAll("_", " ")}
     </span>
@@ -66,6 +68,7 @@ function StatusCell({ data }) {
 
 // Click the invoice number to open its saved invoice preview.
 function InvoiceNumberCell({ data, context }) {
+  if (!data) return null;
   return (
     <button
       type="button"
@@ -90,6 +93,7 @@ function InvoiceNumberCell({ data, context }) {
 }
 
 function ActionCell({ data, context }) {
+  if (!data) return null;
   return (
     <div className="actions" style={{ gap: 6, flexWrap: "nowrap" }}>
       <button
@@ -104,7 +108,7 @@ function ActionCell({ data, context }) {
         <button type="button" className="btn small" onClick={() => context.send(data)}>
           Send
         </button>
-      ) : data.days_overdue > 0 ? (
+      ) : (data.days_overdue || 0) > 0 ? (
         <button type="button" className="btn small" onClick={() => context.chase(data)}>
           AI Chase
         </button>
@@ -147,9 +151,9 @@ const status = {
   sortable: true,
   filter: "agTextColumnFilter",
   valueGetter: (p) =>
-    p.data.days_overdue > 0
+    (p.data?.days_overdue || 0) > 0
       ? "OVERDUE"
-      : normalizeStatus(p.data.status),
+      : normalizeStatus(p.data?.status),
   cellRenderer: StatusCell,
 };
 
@@ -330,7 +334,7 @@ export default function Ledger() {
       )
     );
 
-    const late = waiting.filter((row) => row.days_overdue > 0);
+    const late = waiting.filter((row) => (row.days_overdue || 0) > 0);
 
     return `${rows.length} ${
       rows.length === 1 ? "invoice" : "invoices"
