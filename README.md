@@ -288,3 +288,4 @@ AI-generated information is presented for user review before invoices and remind
 ## 📄 License
 
 See the repository's `LICENSE` file for the applicable open-source license.
+ 
