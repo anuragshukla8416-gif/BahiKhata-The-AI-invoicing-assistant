@@ -64,3 +64,25 @@ export function totals(items) {
 export function lineAmount(i) {
   return toCents((Number(i.quantity) || 0) * (Number(i.unit_price) || 0)) / 100;
 }
+
+const RATES = {
+  USD_TO_INR: 86.5,
+  EUR_TO_INR: 93.0,
+  GBP_TO_INR: 110.0,
+};
+
+export function convertPrice(price, fromCur, toCur) {
+  const p = Number(price);
+  if (!Number.isFinite(p) || p === 0 || fromCur === toCur) return price;
+
+  let inr = p;
+  if (fromCur === "USD") inr = p * RATES.USD_TO_INR;
+  else if (fromCur === "EUR") inr = p * RATES.EUR_TO_INR;
+  else if (fromCur === "GBP") inr = p * RATES.GBP_TO_INR;
+
+  if (toCur === "INR") return Math.round(inr);
+  if (toCur === "USD") return Number((inr / RATES.USD_TO_INR).toFixed(2));
+  if (toCur === "EUR") return Number((inr / RATES.EUR_TO_INR).toFixed(2));
+  if (toCur === "GBP") return Number((inr / RATES.GBP_TO_INR).toFixed(2));
+  return price;
+}

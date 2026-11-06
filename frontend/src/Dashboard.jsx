@@ -218,47 +218,100 @@ function InvoiceStatusChart({ rows }) {
   }, [rows]);
 
   const total = rows.length;
+  const paidCount = statuses.find((s) => s.key === "paid")?.count || 0;
+  const efficiency = total > 0 ? Math.round((paidCount / total) * 100) : 0;
 
   return (
     <div className="dash-status-chart">
-      <div
-        className="dash-status-bar"
-        role="img"
-        aria-label={statuses
-          .map((item) => `${item.label}: ${item.count}`)
-          .join(", ")}
-      >
-        {total > 0 ? (
-          statuses
-            .filter((item) => item.count > 0)
-            .map((item) => (
-              <div
-                key={item.key}
-                style={{
-                  width: `${(item.count / total) * 100}%`,
-                  background: item.color,
-                }}
-                title={`${item.label}: ${item.count}`}
-              />
-            ))
-        ) : (
-          <div style={{ width: "100%", background: "#e6e4dd" }} />
-        )}
-      </div>
+      <div className="dash-donut-wrap">
+        <svg className="dash-donut-svg" viewBox="0 0 100 100" width="100" height="100" aria-label={`Collection efficiency ${efficiency}%`}>
+          <circle
+            cx="50"
+            cy="50"
+            r="38"
+            fill="transparent"
+            stroke="var(--rule)"
+            strokeWidth="9"
+          />
+          <circle
+            cx="50"
+            cy="50"
+            r="38"
+            fill="transparent"
+            stroke={PALETTE.green}
+            strokeWidth="9"
+            strokeDasharray={238.76}
+            strokeDashoffset={238.76 * (1 - efficiency / 100)}
+            strokeLinecap="round"
+            transform="rotate(-90 50 50)"
+          />
+          <text
+            x="50"
+            y="47"
+            textAnchor="middle"
+            dominantBaseline="central"
+            fontSize="18"
+            fontWeight="700"
+            fill="var(--ink)"
+            fontFamily="var(--sans)"
+          >
+            {efficiency}%
+          </text>
+          <text
+            x="50"
+            y="64"
+            textAnchor="middle"
+            dominantBaseline="central"
+            fontSize="9"
+            fontWeight="600"
+            fill="var(--muted)"
+            fontFamily="var(--sans)"
+          >
+            COLLECTED
+          </text>
+        </svg>
 
-      <div className="dash-status-legend">
-        {statuses.map((item) => (
-          <div className="dash-legend-item" key={item.key}>
-            <span
-              className="dash-legend-dot"
-              style={{ background: item.color }}
-            />
-
-            <span>{item.label}</span>
-
-            <strong>{item.count}</strong>
+        <div className="dash-donut-details">
+          <div
+            className="dash-status-bar"
+            role="img"
+            aria-label={statuses
+              .map((item) => `${item.label}: ${item.count}`)
+              .join(", ")}
+          >
+            {total > 0 ? (
+              statuses
+                .filter((item) => item.count > 0)
+                .map((item) => (
+                  <div
+                    key={item.key}
+                    style={{
+                      width: `${(item.count / total) * 100}%`,
+                      background: item.color,
+                    }}
+                    title={`${item.label}: ${item.count}`}
+                  />
+                ))
+            ) : (
+              <div style={{ width: "100%", background: "#e6e4dd" }} />
+            )}
           </div>
-        ))}
+
+          <div className="dash-status-legend">
+            {statuses.map((item) => (
+              <div className="dash-legend-item" key={item.key}>
+                <span
+                  className="dash-legend-dot"
+                  style={{ background: item.color }}
+                />
+
+                <span>{item.label}</span>
+
+                <strong>{item.count}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );

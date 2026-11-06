@@ -230,12 +230,38 @@ export default function Ledger() {
   const [rows, setRows] = useState(null);
   const [reminder, setReminder] = useState(null);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [paymentCelebration, setPaymentCelebration] = useState(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
 
   const gridRef = useRef(null);
   const working = useRef(false);
   const narrow = useNarrow();
+
+  const simulatePayment = (row) => {
+    const updated = {
+      ...row,
+      status: "PAID",
+      paid_at: new Date().toISOString(),
+      days_overdue: 0,
+    };
+    setRows((prev) => (prev ? prev.map((r) => (r.id === row.id ? updated : r)) : prev));
+    setSelectedInvoice(updated);
+    setPaymentCelebration(
+      `🎉 Sandbox Payment Success! Received ${row.currency || "USD"} ${row.total} for Invoice ${row.invoice_number}.`
+    );
+    api("/api/invoices/sync", {}).catch(() => {});
+  };
+
+  const shareWhatsAppInvoice = (row) => {
+    const text = `Namaste ${row.client_name || "Client"},\n\nHere is your invoice #${row.invoice_number} for ${row.currency || "USD"} ${row.total} from BahiKhata.\n\nReview & Pay securely with PayPal:\n${window.location.origin}/app/ledger\n\nThank you for your business!`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+  };
+
+  const shareWhatsAppReminder = (rem) => {
+    const text = `*Payment Reminder from BahiKhata*\n\n${rem.body}\n\nInvoice: #${rem.row.invoice_number} • Balance: ${rem.row.currency || "USD"} ${rem.row.total}\n\nPay online with PayPal:\n${window.location.origin}/app/ledger`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+  };
 
   const load = useCallback(
     () =>
@@ -463,18 +489,50 @@ export default function Ledger() {
               </button>
             </div>
 
+            {paymentCelebration && (
+              <div className="done" role="status" style={{ marginBottom: 16 }}>
+                <b>{paymentCelebration}</b>
+              </div>
+            )}
+
             <InvoiceSheet
               invoice={selectedInvoice}
               number={selectedInvoice.invoice_number}
+              onSimulatePay={
+                normalizeStatus(selectedInvoice.status) !== "PAID"
+                  ? () => simulatePayment(selectedInvoice)
+                  : undefined
+              }
             />
 
             <div
               className="actions"
-              style={{ justifyContent: "flex-end", marginTop: 20 }}
+              style={{ justifyContent: "space-between", marginTop: 20 }}
             >
+              <div className="actions">
+                <button
+                  type="button"
+                  className="btn small"
+                  onClick={() => shareWhatsAppInvoice(selectedInvoice)}
+                  style={{ background: "#25D366", borderColor: "#25D366", color: "#fff" }}
+                >
+                  💬 Share on WhatsApp
+                </button>
+                <button
+                  type="button"
+                  className="btn small quiet"
+                  onClick={() => window.print()}
+                >
+                  🖨️ Print / PDF
+                </button>
+              </div>
+
               <button
                 className="btn quiet"
-                onClick={() => setSelectedInvoice(null)}
+                onClick={() => {
+                  setSelectedInvoice(null);
+                  setPaymentCelebration(null);
+                }}
               >
                 Back to ledger
               </button> 
@@ -529,6 +587,15 @@ export default function Ledger() {
                 onClick={sendReminder}
               >
                 Send through PayPal
+              </button>
+
+              <button
+                type="button"
+                className="btn quiet"
+                onClick={() => shareWhatsAppReminder(reminder)}
+                style={{ borderColor: "#25D366", color: "#128C7E", fontWeight: 600 }}
+              >
+                💬 Send via WhatsApp
               </button>
 
               <button

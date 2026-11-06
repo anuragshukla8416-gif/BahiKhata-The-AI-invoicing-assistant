@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Link } from "./nav.jsx";
 import { InvoiceSheet, Stroke } from "./ui.jsx";
-import { api } from "./lib.js";
+import { api, convertPrice, totals } from "./lib.js";
 
 const CURRENCIES = ["USD", "INR", "EUR", "GBP", "AUD", "CAD", "SGD", "AED"];
 const blankItem = () => ({ name: "", quantity: "1", unit_price: "", tax_rate: "0" });
@@ -9,7 +9,7 @@ const inDays = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0,
 const blank = () => ({
   client_name: "",
   client_email: "",
-  currency: "USD",
+  currency: "INR",
   tax_name: "GST",
   items: [blankItem()],
   due_date: inDays(15),
@@ -80,56 +80,61 @@ function problem(f) {
 export default function Studio() {
   const [notes, setNotes] = useState("");
   const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef(null);
 
-const startVoiceInput = () => {
-  const SpeechRecognition =
-    window.SpeechRecognition || window.webkitSpeechRecognition;
+  const toggleVoiceInput = () => {
+    if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsListening(false);
+      return;
+    }
 
-  if (!SpeechRecognition) {
-    setError("Voice input is not supported in this browser. Try Chrome or Edge.");
-    return;
-  }
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
 
-  const recognition = new SpeechRecognition();
+    if (!SpeechRecognition) {
+      setError("Voice dictation is not supported in this browser. Try Chrome or Edge.");
+      return;
+    }
 
-  recognition.lang = "en-IN";
-  recognition.continuous = false;
-  recognition.interimResults = false;
+    try {
+      const recognition = new SpeechRecognition();
+      recognitionRef.current = recognition;
+      recognition.lang = "en-IN";
+      recognition.continuous = false;
+      recognition.interimResults = false;
 
-  recognition.onstart = () => {
-    setIsListening(true);
-    setError("");
-  };
+      recognition.onstart = () => {
+        setIsListening(true);
+        setError("");
+      };
 
-  recognition.onresult = (event) => {
-    const transcript = event.results[0][0].transcript;
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        setNotes((prev) => (prev.trim() ? `${prev.trim()} ${transcript}` : transcript));
+      };
 
-    setNotes((previous) =>
-      previous.trim()
-        ? `${previous.trim()} ${transcript}`
-        : transcript
-    );
-  };
+      recognition.onerror = (event) => {
+        if (event.error === "not-allowed") {
+          setError("Microphone permission was denied. Please allow microphone access in your browser.");
+        } else if (event.error !== "no-speech" && event.error !== "aborted") {
+          setError(`Voice input error: ${event.error}`);
+        }
+      };
 
-  recognition.onerror = (event) => {
-    if (event.error === "not-allowed") {
-      setError("Please allow microphone access in your browser settings.");
-    } else if (event.error !== "no-speech" && event.error !== "aborted") {
-      setError(`Voice input failed: ${event.error}`);
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognition.start();
+    } catch {
+      setIsListening(false);
+      setError("Could not start voice input. Please check microphone settings.");
     }
   };
 
-  recognition.onend = () => {
-    setIsListening(false);
-  };
-
-  try {
-    recognition.start();
-  } catch (e) {
-    setIsListening(false);
-    setError("Could not start voice input. Check microphone permissions and try again.");
-  }
-};
   const [form, setForm] = useState(blank);
   const [missing, setMissing] = useState(null);
   const [created, setCreated] = useState(null);
@@ -138,7 +143,28 @@ const startVoiceInput = () => {
   const working = useRef(false);
 
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
-  const setItem = (n, patch) => setForm((f) => ({ ...f, items: f.items.map((i, k) => (k === n ? { ...i, ...patch } : i)) }));
+  const setItem = (n, patch) =>
+    setForm((f) => ({ ...f, items: f.items.map((i, k) => (k === n ? { ...i, ...patch } : i)) }));
+
+  // Live currency converter
+  const convertCurrency = (targetCur) => {
+    if (form.currency === targetCur) return;
+    const oldCur = form.currency;
+    const convertedItems = form.items.map((item) => {
+      const unit = Number(item.unit_price);
+      if (!Number.isFinite(unit) || unit === 0) return item;
+      return {
+        ...item,
+        unit_price: String(convertPrice(unit, oldCur, targetCur)),
+      };
+    });
+    setForm((f) => ({
+      ...f,
+      currency: targetCur,
+      tax_name: targetCur === "INR" ? "GST" : "GST",
+      items: convertedItems,
+    }));
+  };
 
   async function run(label, fn) {
     if (working.current) return;
@@ -183,6 +209,14 @@ const startVoiceInput = () => {
     setError("");
   };
 
+  const shareWhatsApp = () => {
+    if (!created) return;
+    const sum = totals(form.items);
+    const invoiceNumber = created.invoice_number || "Draft";
+    const msg = `Namaste ${form.client_name || "Client"},\n\nHere is your invoice #${invoiceNumber} for ${form.currency} ${sum.total.toFixed(2)} from BahiKhata.\n\nReview & Pay securely with PayPal:\n${window.location.origin}/app/ledger\n\nThank you for your business!`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+  };
+
   const options = CURRENCIES.includes(form.currency) ? CURRENCIES : [form.currency, ...CURRENCIES];
 
   return (
@@ -211,6 +245,23 @@ const startVoiceInput = () => {
               {created.status === "DRAFT" && (
                 <button className="btn small" disabled={!!busy} onClick={send}>Send to client</button>
               )}
+              <button
+                type="button"
+                className="btn small"
+                onClick={shareWhatsApp}
+                title="Share this invoice with client on WhatsApp"
+                style={{ background: "#25D366", borderColor: "#25D366", color: "#fff" }}
+              >
+                💬 Share on WhatsApp
+              </button>
+              <button
+                type="button"
+                className="btn small quiet"
+                onClick={() => window.print()}
+                title="Print or Save invoice as PDF"
+              >
+                🖨️ Print / PDF
+              </button>
               <Link to="/app/ledger" className="btn small quiet">Open the ledger</Link>
               <button className="btn small text" onClick={reset}>Start another</button>
             </div>
@@ -221,25 +272,31 @@ const startVoiceInput = () => {
         <fieldset disabled={!!created}>
           <div className="step"><i>01</i><h2>Describe your invoice</h2></div>
           <div className="field">
-  <label htmlFor="notes">Invoice description</label>
+            <div className="field-head-with-voice">
+              <label htmlFor="notes">Invoice description</label>
+              <button
+                type="button"
+                className={`voice-dictate-btn ${isListening ? "listening" : ""}`}
+                onClick={toggleVoiceInput}
+                disabled={!!busy}
+                title="Dictate in English or Hindi / Hinglish"
+                aria-label={isListening ? "Stop listening" : "Dictate invoice details with microphone"}
+              >
+                <span className="voice-mic-icon" aria-hidden="true">
+                  {isListening ? "🔴" : "🎙️"}
+                </span>
+                <span>{isListening ? "Listening... (tap to stop)" : "Voice Dictate (Mic)"}</span>
+              </button>
+            </div>
 
-  <textarea
-    id="notes"
-    value={notes}
-    onChange={(e) => setNotes(e.target.value)}
-    placeholder="Example: Brand identity for Meera Shah, 3 days at ₹8,000 per day, plus ₹2,500 for print-ready files. Add 18% GST; payment due in 15 days."
-  />
+            <textarea
+              id="notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Speak or type: Brand identity for Meera Shah, 3 days at ₹8,000 per day, plus ₹2,500 for print files. 18% GST; payment due in 15 days."
+            />
+          </div>
 
-  <button
-    type="button"
-    className="btn quiet small"
-    onClick={startVoiceInput}
-    disabled={!!busy || isListening}
-    style={{ marginTop: 10 }}
-  >
-    {isListening ? "Listening…" : "Dictate invoice details"}
-  </button>
-</div>
           <div className="actions">
             <button className="btn quiet small" disabled={!!busy || notes.trim().length < 5} onClick={readNotes}>
               Generate invoice details
@@ -328,8 +385,40 @@ const startVoiceInput = () => {
             <p className="eyebrow">Live preview</p>
             <h2>Your invoice</h2>
           </div>
-          <span className="studio-preview-status">Updates as you edit</span>
+          <div className="preview-toolbar">
+            <button
+              type="button"
+              className="btn small quiet"
+              onClick={() => window.print()}
+              title="Print or Save invoice as PDF"
+            >
+              🖨️ Print / PDF
+            </button>
+            <span className="studio-preview-status">Updates as you edit</span>
+          </div>
         </header>
+
+        {/* Multi-Currency Quick Switcher */}
+        <div className="currency-converter-bar">
+          <span className="converter-label">Currency Quick-Convert:</span>
+          <button
+            type="button"
+            className={`currency-pill ${form.currency === "INR" ? "active" : ""}`}
+            onClick={() => convertCurrency("INR")}
+            title="Convert line prices to Indian Rupees"
+          >
+            ₹ INR (₹86.5/$)
+          </button>
+          <button
+            type="button"
+            className={`currency-pill ${form.currency === "USD" ? "active" : ""}`}
+            onClick={() => convertCurrency("USD")}
+            title="Convert line prices to US Dollars"
+          >
+            $ USD
+          </button>
+        </div>
+
         <InvoiceSheet invoice={form} number={created?.invoice_number} />
         <p className="caption">Review the details and totals before creating your invoice draft.</p>
       </section>

@@ -26,16 +26,35 @@ export function Stroke({ label }) {
   );
 }
 
-const today = () => new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+const today = () =>
+  new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 
-export function InvoiceSheet({ invoice, number }) {
-  const { client_name, client_email, currency = "USD", tax_name = "GST", items = [], due_date, notes } = invoice;
+export function InvoiceSheet({ invoice, number, onSimulatePay }) {
+  const {
+    client_name,
+    client_email,
+    currency = "USD",
+    tax_name = "GST",
+    items = [],
+    due_date,
+    notes,
+    status,
+  } = invoice;
+
+  const isPaid = status === "PAID" || status === "MARKED_AS_PAID";
   const shown = items.filter((i) => i.name || Number(i.unit_price));
   const sum = totals(shown);
   const fmt = (n) => money(n, currency);
 
   return (
     <article className="sheet" aria-label="Invoice preview">
+      {isPaid && (
+        <div className="paid-stamp" aria-label="Paid in full">
+          <span>✓ CHUKTA / PAID</span>
+          <small>PayPal Payment Settled</small>
+        </div>
+      )}
+
       <header className="s-head">
         <div>
           <div className="s-title">Invoice</div>
@@ -92,7 +111,24 @@ export function InvoiceSheet({ invoice, number }) {
       </div>
 
       {notes && <div className="s-note">{notes}</div>}
-      <footer className="s-foot">Payable online through PayPal.</footer>
+
+      {onSimulatePay && !isPaid && (
+        <div className="sheet-pay-bar no-print">
+          <button
+            type="button"
+            className="btn-sheet-pay"
+            onClick={onSimulatePay}
+            title="Simulate paying this invoice in PayPal Sandbox"
+          >
+            <span>🅿️ Pay with PayPal (Demo)</span>
+          </button>
+        </div>
+      )}
+
+      <footer className="s-foot">
+        <span>Payable online through PayPal.</span>
+        <span className="s-foot-right">BahiKhata Ledger • India GST Compliant</span>
+      </footer>
     </article>
   );
 }

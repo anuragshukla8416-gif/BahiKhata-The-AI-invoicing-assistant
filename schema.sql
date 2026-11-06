@@ -39,3 +39,16 @@ create table webhook_events (
 alter table invoices enable row level security;
 alter table reminders enable row level security;
 alter table webhook_events enable row level security;
+
+create table payments (
+  id uuid primary key default gen_random_uuid(),
+  invoice_id uuid not null references invoices(id) on delete cascade,
+  amount numeric(12,2) not null check (amount > 0),
+  currency text not null,
+  paypal_capture_id text unique,
+  paid_at timestamptz not null default now()
+);
+
+create index payments_invoice_idx on payments (invoice_id);
+
+alter table payments enable row level security;

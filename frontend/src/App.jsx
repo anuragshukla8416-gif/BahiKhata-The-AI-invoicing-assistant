@@ -4,9 +4,12 @@ import Studio from "./Studio.jsx";
 import Ledger from "./Ledger.jsx";
 import Dashboard from "./Dashboard.jsx";
 import Insights from "./Insights.jsx";
+import Login from "./Login.jsx";
+import BusinessModal from "./BusinessModal.jsx";
 import { Privacy, Terms } from "./Legal.jsx";
 import { Mark } from "./ui.jsx";
 import { CONTACT, Link, NavContext } from "./nav.jsx";
+import { getStoredUser, setStoredUser, clearStoredUser } from "./auth.js";
 
 const clean = (p) => {
   if (!p) return "/";
@@ -14,8 +17,9 @@ const clean = (p) => {
   return pathOnly.length > 1 ? pathOnly.replace(/\/+$/, "") : pathOnly;
 };
 
-function Header({ path }) {
+function Header({ path, user, onLogout, onOpenBusinessModal }) {
   const inApp = path.startsWith("/app");
+  const isLogin = path === "/login";
 
   return (
     <header className={inApp ? "top wide" : "top"}>
@@ -26,7 +30,11 @@ function Header({ path }) {
         </Link>
 
         <nav className="nav">
-          {inApp ? (
+          {isLogin ? (
+            <Link to="/" className="btn top-btn-secondary">
+              Back to Home
+            </Link>
+          ) : inApp ? (
             <>
               <Link
                 to="/app/dashboard"
@@ -55,6 +63,31 @@ function Header({ path }) {
               >
                 AI Insights
               </Link>
+
+              {user && (
+                <div className="nav-user">
+                  <button
+                    type="button"
+                    className="user-badge-btn"
+                    onClick={onOpenBusinessModal}
+                    title="Tap to view business details"
+                    aria-label="View business profile"
+                  >
+                    <span className="user-avatar" aria-hidden="true">
+                      {(user.name || user.email || "U").charAt(0)}
+                    </span>
+                    <span>{user.name || user.email}</span>
+                    <span className="user-badge-caret" aria-hidden="true">▾</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn top-btn-logout"
+                    onClick={onLogout}
+                  >
+                    Sign Out
+                  </button>
+                </div>
+              )}
             </>
           ) : (
             <>
@@ -70,9 +103,42 @@ function Header({ path }) {
                 </a>
               )}
 
-              <Link to="/app/dashboard" className="btn small">
-                Open Dashboard
-              </Link>
+              {user ? (
+                <>
+                  <button
+                    type="button"
+                    className="user-badge-btn"
+                    onClick={onOpenBusinessModal}
+                    title="Tap to view business details"
+                    aria-label="View business profile"
+                  >
+                    <span className="user-avatar" aria-hidden="true">
+                      {(user.name || user.email || "U").charAt(0)}
+                    </span>
+                    <span>{user.name || user.email}</span>
+                    <span className="user-badge-caret" aria-hidden="true">▾</span>
+                  </button>
+                  <Link to="/app/dashboard" className="btn top-btn-primary">
+                    Open Dashboard
+                  </Link>
+                  <button
+                    type="button"
+                    className="btn top-btn-logout"
+                    onClick={onLogout}
+                  >
+                    Sign Out
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Link to="/login" className="btn top-btn-secondary">
+                    Sign In
+                  </Link>
+                  <Link to="/app/dashboard" className="btn top-btn-primary">
+                    Open Dashboard
+                  </Link>
+                </>
+              )}
             </>
           )}
         </nav>
@@ -123,6 +189,7 @@ export function Footer({ compact }) {
 
 const TITLES = {
   "/": "BahiKhata | The AI invoicing assistant",
+  "/login": "Sign In | BahiKhata",
   "/app": "Studio | BahiKhata",
   "/app/dashboard": "Dashboard | BahiKhata",
   "/app/ledger": "Ledger | BahiKhata",
@@ -146,42 +213,106 @@ function NotFound() {
 }
 
 export default function App() {
+  const [user, setUser] = useState(() => getStoredUser());
+  const [redirectTarget, setRedirectTarget] = useState(null);
+  const [showBusinessModal, setShowBusinessModal] = useState(false);
   const [path, setPath] = useState(() =>
     clean(window.location.pathname)
   );
 
+  // Intercept directly-typed URLs or reloads if not authenticated
   useEffect(() => {
-    const onPop = () => setPath(clean(window.location.pathname));
+    if (!user && path !== "/" && path !== "/login") {
+      setRedirectTarget(path);
+      window.history.replaceState({}, "", "/login");
+      setPath("/login");
+    }
+  }, [user, path]);
+
+  // Handle browser back / forward navigation
+  useEffect(() => {
+    const onPop = () => {
+      const next = clean(window.location.pathname);
+      if (!user && next !== "/" && next !== "/login") {
+        setRedirectTarget(next);
+        setPath("/login");
+      } else {
+        setPath(next);
+      }
+    };
 
     window.addEventListener("popstate", onPop);
-
     return () => window.removeEventListener("popstate", onPop);
-  }, []);
+  }, [user]);
 
+  // Update browser tab title
   useEffect(() => {
     document.title = TITLES[path] || "Page not found | BahiKhata";
   }, [path]);
 
-  const go = useCallback((to) => {
-    const next = clean(to);
+  // Navigation guard callback provided via NavContext
+  const go = useCallback(
+    (to) => {
+      const next = clean(to);
 
-    window.history.pushState({}, "", to);
-    setPath(next);
+      // If user is not authenticated and attempts to leave landing page:
+      if (!user && next !== "/" && next !== "/login") {
+        setRedirectTarget(next);
+        window.history.pushState({}, "", "/login");
+        setPath("/login");
+        window.scrollTo(0, 0);
+        return;
+      }
+
+      window.history.pushState({}, "", to);
+      setPath(next);
+      window.scrollTo(0, 0);
+    },
+    [user]
+  );
+
+  const handleLogin = (userData) => {
+    setStoredUser(userData);
+    setUser(userData);
+    const destination =
+      redirectTarget && redirectTarget !== "/login" && redirectTarget !== "/"
+        ? redirectTarget
+        : "/app/dashboard";
+    setRedirectTarget(null);
+    window.history.pushState({}, "", destination);
+    setPath(destination);
     window.scrollTo(0, 0);
-  }, []);
+  };
+
+  const handleLogout = () => {
+    clearStoredUser();
+    setUser(null);
+    setShowBusinessModal(false);
+    setRedirectTarget(null);
+    window.history.pushState({}, "", "/");
+    setPath("/");
+    window.scrollTo(0, 0);
+  };
+
+  const handleUpdateUser = (updatedUser) => {
+    setStoredUser(updatedUser);
+    setUser(updatedUser);
+  };
 
   let page;
 
   if (path === "/") {
     page = <Landing />;
+  } else if (path === "/login") {
+    page = <Login onLogin={handleLogin} redirectTarget={redirectTarget} />;
   } else if (path === "/app") {
-    page = <Studio />;
+    page = user ? <Studio /> : <Login onLogin={handleLogin} redirectTarget="/app" />;
   } else if (path === "/app/dashboard") {
-    page = <Dashboard />;
+    page = user ? <Dashboard /> : <Login onLogin={handleLogin} redirectTarget="/app/dashboard" />;
   } else if (path === "/app/ledger") {
-    page = <Ledger />;
+    page = user ? <Ledger /> : <Login onLogin={handleLogin} redirectTarget="/app/ledger" />;
   } else if (path === "/app/insights") {
-    page = <Insights />;
+    page = user ? <Insights /> : <Login onLogin={handleLogin} redirectTarget="/app/insights" />;
   } else if (path === "/privacy") {
     page = <Privacy />;
   } else if (path === "/terms") {
@@ -192,9 +323,22 @@ export default function App() {
 
   return (
     <NavContext.Provider value={go}>
-      <Header path={path} />
+      <Header
+        path={path}
+        user={user}
+        onLogout={handleLogout}
+        onOpenBusinessModal={() => setShowBusinessModal(true)}
+      />
       {page}
       <Footer compact={path !== "/"} />
+      {showBusinessModal && user && (
+        <BusinessModal
+          user={user}
+          onClose={() => setShowBusinessModal(false)}
+          onUpdateUser={handleUpdateUser}
+          onLogout={handleLogout}
+        />
+      )}
     </NavContext.Provider>
   );
 }
