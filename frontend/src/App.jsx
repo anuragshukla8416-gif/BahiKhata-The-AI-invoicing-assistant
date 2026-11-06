@@ -17,7 +17,278 @@ const clean = (p) => {
   return pathOnly.length > 1 ? pathOnly.replace(/\/+$/, "") : pathOnly;
 };
 
+import { useCallback, useEffect, useState } from "react";
+import Landing from "./Landing.jsx";
+import Studio from "./Studio.jsx";
+import Ledger from "./Ledger.jsx";
+import Dashboard from "./Dashboard.jsx";
+import Login from "./Login.jsx";
+import BusinessModal from "./BusinessModal.jsx";
+import { Privacy, Terms } from "./Legal.jsx";
+import { Mark } from "./ui.jsx";
+import { CONTACT, Link, NavContext } from "./nav.jsx";
+import { getStoredUser, setStoredUser, clearStoredUser } from "./auth.js";
+
+const clean = (p) => {
+  if (!p) return "/";
+  const pathOnly = p.split("?")[0].split("#")[0];
+  return pathOnly.length > 1 ? pathOnly.replace(/\\+$/,"") : pathOnly;
+};
+
 function Header({ path, user, onLogout, onOpenBusinessModal }) {
+  const inApp = path.startsWith("/app");
+  const isLogin = path === "/login";
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  return (
+    <header className={inApp ? "top wide" : "top"}>
+      <div className="wrap">
+        {/* Mobile menu toggle */}
+        <button
+          className="nav-toggle"
+          type="button"
+          aria-label="Toggle navigation"
+          onClick={() => setMobileNavOpen(!mobileNavOpen)}
+        >
+          ☰
+        </button>
+        <Link to="/" className="brand" aria-label="BahiKhata home">
+          <Mark />
+          <b>BahiKhata</b>
+        </Link>
+        {/* Regular navigation (hidden on mobile) */}
+        <nav className="nav">
+          {isLogin ? (
+            <Link to="/" className="btn top-btn-secondary">
+              Back to Home
+            </Link>
+          ) : inApp ? (
+            <>
+              <Link
+                to="/app/dashboard"
+                className={path === "/app/dashboard" ? "on" : ""}
+              >
+                Dashboard
+              </Link>
+
+              <Link to="/app" className={path === "/app" ? "on" : ""}>
+                Studio
+              </Link>
+
+              <Link
+                to="/app/ledger"
+                className={path === "/app/ledger" ? "on" : ""}
+              >
+                Ledger
+              </Link>
+
+              <Link
+                to="/app/insights"
+                className={path === "/app/insights" ? "on" : ""}
+              >
+                AI Insights
+              </Link>
+
+              {user && (
+                <div className="nav-user">
+                  <button
+                    type="button"
+                    className="user-badge-btn"
+                    onClick={onOpenBusinessModal}
+                    title="Tap to view business details"
+                    aria-label="View business profile"
+                  >
+                    <span className="user-avatar" aria-hidden="true">
+                      {(user.name || user.email || "U").charAt(0)}
+                    </span>
+                    <span>{user.name || user.email}</span>
+                    <span className="user-badge-caret" aria-hidden="true">▾</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn top-btn-logout"
+                    onClick={onLogout}
+                  >
+                    Sign Out
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {path === "/" && (
+                <a className="hide-sm" href="#how">
+                  How it works
+                </a>
+              )}
+
+              {path === "/" && (
+                <a className="hide-sm" href="#details">
+                  Details
+                </a>
+              )}
+
+              {user ? (
+                <>
+                  <button
+                    type="button"
+                    className="user-badge-btn"
+                    onClick={onOpenBusinessModal}
+                    title="Tap to view business details"
+                    aria-label="View business profile"
+                  >
+                    <span className="user-avatar" aria-hidden="true">
+                      {(user.name || user.email || "U").charAt(0)}
+                    </span>
+                    <span>{user.name || user.email}</span>
+                    <span className="user-badge-caret" aria-hidden="true">▾</span>
+                  </button>
+                  <Link to="/app/dashboard" className="btn top-btn-primary">
+                    Open Dashboard
+                  </Link>
+                  <button
+                    type="button"
+                    className="btn top-btn-logout"
+                    onClick={onLogout}
+                  >
+                    Sign Out
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Link to="/login" className="btn top-btn-secondary">
+                    Sign In
+                  </Link>
+                  <Link to="/app/dashboard" className="btn top-btn-primary">
+                    Open Dashboard
+                  </Link>
+                </>
+              )}
+            </>
+          )}
+        </nav>
+        {/* Mobile navigation overlay */}
+        {mobileNavOpen && (
+          <nav className="mobile-nav open">
+            <button
+              className="mobile-nav-close"
+              type="button"
+              aria-label="Close navigation"
+              onClick={() => setMobileNavOpen(false)}
+            >
+              ✕
+            </button>
+            {inApp ? (
+              <>
+                <Link to="/app/dashboard" onClick={() => setMobileNavOpen(false)}>
+                  Dashboard
+                </Link>
+                <Link to="/app" onClick={() => setMobileNavOpen(false)}>
+                  Studio
+                </Link>
+                <Link to="/app/ledger" onClick={() => setMobileNavOpen(false)}>
+                  Ledger
+                </Link>
+                <Link to="/app/insights" onClick={() => setMobileNavOpen(false)}>
+                  AI Insights
+                </Link>
+              </>
+            ) : (
+              <>
+                <Link to="/" onClick={() => setMobileNavOpen(false)}>
+                  Home
+                </Link>
+                <Link to="/login" onClick={() => setMobileNavOpen(false)}>
+                  Sign In
+                </Link>
+              </>
+            )}
+          </nav>
+        )}
+          <nav className="mobile-nav">
+            {inApp ? (
+              <>
+                <Link to="/app/dashboard" onClick={() => setMobileNavOpen(false)}>
+                  Dashboard
+                </Link>
+                <Link to="/app" onClick={() => setMobileNavOpen(false)}>
+                  Studio
+                </Link>
+                <Link to="/app/ledger" onClick={() => setMobileNavOpen(false)}>
+                  Ledger
+                </Link>
+                <Link to="/app/insights" onClick={() => setMobileNavOpen(false)}>
+                  AI Insights
+                </Link>
+              </>
+            ) : (
+              <>
+                <Link to="/" onClick={() => setMobileNavOpen(false)}>
+                  Home
+                </Link>
+                <Link to="/login" onClick={() => setMobileNavOpen(false)}>
+                  Sign In
+                </Link>
+              </>
+            )}
+          </nav>
+        )}
+      </div>
+    </header>
+  );
+}
+
+export function Footer({ compact }) {
+  return (
+    <footer className={compact ? "foot compact" : "foot"}>
+      <div className="wrap">
+        <div className="cols">
+          <div>
+            {compact ? (
+              <span>BahiKhata, built by Anurag Shukla.</span>
+            ) : (
+              <>
+                <Link to="/" className="brand">
+                  <Mark size={24} />
+                  <b>BahiKhata</b>
+                </Link>
+
+                <p style={{ marginTop: 10 }}>
+                  The AI invoicing assistant. Built for the PayPal AI Hackathon.
+                </p>
+              </>
+            )}
+          </div>
+
+          <nav>
+            <Link to="/privacy">Privacy Policy</Link>
+            <Link to="/terms">Terms</Link>
+            <a href={`mailto:${CONTACT}`}>Contact</a>
+          </nav>
+        </div>
+
+        {!compact && (
+          <small>
+            PayPal is a trademark of PayPal, Inc. BahiKhata is an independent
+            project and is not affiliated with or endorsed by PayPal or OpenAI.
+          </small>
+        )}
+      </div>
+    </footer>
+  );
+}
+
+const TITLES = {
+  "/": "BahiKhata | The AI invoicing assistant",
+  "/login": "Sign In | BahiKhata",
+  "/app": "Studio | BahiKhata",
+  "/app/dashboard": "Dashboard | BahiKhata",
+  "/app/ledger": "Ledger | BahiKhata",
+  "/app/insights": "AI Insights | BahiKhata",
+  "/privacy": "Privacy Policy | BahiKhata",
+  "/terms": "Terms and Conditions | BahiKhata",
+};
+({ path, user, onLogout, onOpenBusinessModal }) {
   const inApp = path.startsWith("/app");
   const isLogin = path === "/login";
 
