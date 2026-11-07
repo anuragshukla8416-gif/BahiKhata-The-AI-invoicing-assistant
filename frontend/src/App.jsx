@@ -22,21 +22,12 @@ const clean = (p) => {
 function Header({ path, user, onLogout, onOpenBusinessModal }) {
   const inApp = path.startsWith("/app");
   const isLogin = path === "/login";
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
 
   return (
     <header className={inApp ? "top wide" : "top"}>
       <div className="wrap">
-        {/* Mobile menu toggle */}
-        <button
-          className="nav-toggle"
-          type="button"
-          aria-label="Toggle navigation"
-          onClick={() => setMobileNavOpen(!mobileNavOpen)}
-        >
-          ☰
-        </button>
-        <Link to="/" className="brand" aria-label="BahiKhata home">
+                <Link to="/" className="brand" aria-label="BahiKhata home">
           <Mark />
           <b>BahiKhata</b>
         </Link>
@@ -136,71 +127,7 @@ function Header({ path, user, onLogout, onOpenBusinessModal }) {
             </>
           )}
         </nav>
-        {/* Mobile navigation overlay */}
-        {mobileNavOpen && (
-          <nav className="mobile-nav open">
-            <button
-              className="mobile-nav-close"
-              type="button"
-              aria-label="Close navigation"
-              onClick={() => setMobileNavOpen(false)}
-            >
-              ✕
-            </button>
-            {inApp ? (
-              <>
-                <Link to="/app/dashboard" onClick={() => setMobileNavOpen(false)}>
-                  Dashboard
-                </Link>
-                <Link to="/app" onClick={() => setMobileNavOpen(false)}>
-                  Studio
-                </Link>
-                <Link to="/app/ledger" onClick={() => setMobileNavOpen(false)}>
-                  Ledger
-                </Link>
-                <Link to="/app/insights" onClick={() => setMobileNavOpen(false)}>
-                  AI Insights
-                </Link>
-              </>
-            ) : (
-              <>
-                <Link to="/" onClick={() => setMobileNavOpen(false)}>
-                  Home
-                </Link>
-                <Link to="/login" onClick={() => setMobileNavOpen(false)}>
-                  Sign In
-                </Link>
-              </>
-            )}
-          </nav>
-        )}
-        <nav className="mobile-nav">
-          {inApp ? (
-            <>
-              <Link to="/app/dashboard" onClick={() => setMobileNavOpen(false)}>
-                Dashboard
-              </Link>
-              <Link to="/app" onClick={() => setMobileNavOpen(false)}>
-                Studio
-              </Link>
-              <Link to="/app/ledger" onClick={() => setMobileNavOpen(false)}>
-                Ledger
-              </Link>
-              <Link to="/app/insights" onClick={() => setMobileNavOpen(false)}>
-                AI Insights
-              </Link>
-            </>
-          ) : (
-            <>
-              <Link to="/" onClick={() => setMobileNavOpen(false)}>
-                Home
-              </Link>
-              <Link to="/login" onClick={() => setMobileNavOpen(false)}>
-                Sign In
-              </Link>
-            </>
-          )}
-        </nav>
+
       </div>
     </header>
   );
