@@ -1,7 +1,9 @@
+// Login component with local‑storage based authentication (no Supabase)
 import { useState } from "react";
 import { Link } from "./nav.jsx";
 import { Mark } from "./ui.jsx";
-import { DEMO_USER } from "./auth.js";
+import { DEMO_USER, setStoredUser, getUserByEmail, addUser, clearStoredUser } from "./auth.js";
+import { simpleHash } from "./hash.js";
 
 export default function Login({ onLogin, redirectTarget }) {
   const [mode, setMode] = useState("signin"); // "signin" | "signup"
@@ -14,62 +16,60 @@ export default function Login({ onLogin, redirectTarget }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
-
     const cleanEmail = email.trim();
-    if (!cleanEmail || !cleanEmail.includes("@")) {
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
       setError("Please enter a valid email address.");
       return;
     }
-
     if (!password || password.length < 4) {
       setError("Password must be at least 4 characters long.");
       return;
     }
-
     if (mode === "signup" && !name.trim()) {
       setError("Please provide your full name or business moniker.");
       return;
     }
-
     setLoading(true);
 
-    // Simulate authenticating session
-    setTimeout(() => {
-      const displayName =
-        mode === "signup"
-          ? name.trim()
-          : cleanEmail.split("@")[0].replace(/[._-]/g, " ");
-
-      const capitalized = displayName
-        .split(" ")
-        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-        .join(" ");
-
-      const user = {
-        name: capitalized,
+    // ---- Sign‑up -------------------------------------------------
+    if (mode === "signup") {
+      const newUser = {
         email: cleanEmail,
-        business: business.trim() || `${capitalized}'s Practice`,
-        token: "session_" + Math.random().toString(36).substring(2, 10),
+        password: simpleHash(password), // hash for demo storage
+        name: name.trim(),
+        business: business.trim(),
+        token: "token_" + Date.now(),
         loggedInAt: new Date().toISOString(),
-        remember,
       };
-
+      addUser(newUser);
+      setStoredUser(newUser);
       setLoading(false);
-      onLogin(user);
-    }, 300);
+      onLogin(newUser);
+      return;
+    }
+
+    // ---- Sign‑in -------------------------------------------------
+    const existingUser = getUserByEmail(cleanEmail);
+    if (!existingUser) {
+      setError("No account found. Please create an account.");
+      setLoading(false);
+      clearStoredUser();
+      setMode("signup");
+      return;
+    }
+    if (existingUser.password !== simpleHash(password)) {
+      setError("Incorrect password.");
+      setLoading(false);
+      return;
+    }
+    setStoredUser(existingUser);
+    setLoading(false);
+    onLogin(existingUser);
   };
 
-  const handleDemoLogin = () => {
-    setError("");
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      onLogin(DEMO_USER);
-    }, 200);
-  };
 
   const targetLabel = (() => {
     if (!redirectTarget || redirectTarget === "/" || redirectTarget === "/login") {
@@ -90,11 +90,7 @@ export default function Login({ onLogin, redirectTarget }) {
             <Mark size={42} />
           </div>
           <h1>{mode === "signin" ? "Sign in to BahiKhata" : "Create your account"}</h1>
-          <p>
-            {targetLabel
-              ? `Sign in to access your ${targetLabel}.`
-              : "Smart bookkeeping and AI invoicing through PayPal."}
-          </p>
+          <p>{targetLabel ? `Sign in to access your ${targetLabel}.` : "Smart bookkeeping and AI invoicing through PayPal."}</p>
         </div>
 
         {targetLabel && (
@@ -107,20 +103,14 @@ export default function Login({ onLogin, redirectTarget }) {
           <button
             type="button"
             className={`auth-tab ${mode === "signin" ? "active" : ""}`}
-            onClick={() => {
-              setMode("signin");
-              setError("");
-            }}
+            onClick={() => { setMode("signin"); setError(""); }}
           >
             Sign In
           </button>
           <button
             type="button"
             className={`auth-tab ${mode === "signup" ? "active" : ""}`}
-            onClick={() => {
-              setMode("signup");
-              setError("");
-            }}
+            onClick={() => { setMode("signup"); setError(""); }}
           >
             Create Account
           </button>
@@ -141,9 +131,7 @@ export default function Login({ onLogin, redirectTarget }) {
           </button>
         </div>
 
-        <div className="auth-divider">
-          <span>or continue with email</span>
-        </div>
+        <div className="auth-divider"><span>or continue with email</span></div>
 
         {error && <div className="err" role="alert">{error}</div>}
 
@@ -163,7 +151,6 @@ export default function Login({ onLogin, redirectTarget }) {
                   required
                 />
               </div>
-
               <div className="field">
                 <label htmlFor="auth-business">Business / Studio Name (optional)</label>
                 <input
@@ -242,18 +229,14 @@ export default function Login({ onLogin, redirectTarget }) {
             {loading
               ? "Authenticating..."
               : mode === "signin"
-              ? "Sign In to BahiKhata"
-              : "Create Account & Enter"}
+                ? "Sign In to BahiKhata"
+                : "Create Account & Enter"}
           </button>
         </form>
 
         <div className="auth-footer">
-          <Link to="/" className="auth-back-link">
-            ← Back to Landing Page
-          </Link>
-          <small style={{ color: "var(--muted)" }}>
-            BahiKhata • AI Invoicing Assistant
-          </small>
+          <Link to="/" className="auth-back-link">← Back to Landing Page</Link>
+          <small style={{ color: "var(--muted)" }}>BahiKhata • AI Invoicing Assistant</small>
         </div>
       </div>
     </main>
