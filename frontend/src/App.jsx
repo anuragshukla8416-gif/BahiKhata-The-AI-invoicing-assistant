@@ -134,7 +134,10 @@ function Header({ path, user, onLogout, onOpenBusinessModal }) {
         </nav>
         {mobileOpen && (
           <div className="mobile-nav open">
-            <button className="mobile-nav-close" aria-label="Close menu" onClick={closeMobile}>✕</button>
+            <div className="mobile-nav-header">
+              <span className="mobile-nav-title">Navigation</span>
+              <button className="mobile-nav-close" aria-label="Close menu" onClick={closeMobile}>✕</button>
+            </div>
             <Link to="/app/dashboard" className={path === "/app/dashboard" ? "on" : ""} onClick={closeMobile}>Dashboard</Link>
             <Link to="/app" className={path === "/app" ? "on" : ""} onClick={closeMobile}>Studio</Link>
             <Link to="/app/ledger" className={path === "/app/ledger" ? "on" : ""} onClick={closeMobile}>Ledger</Link>
