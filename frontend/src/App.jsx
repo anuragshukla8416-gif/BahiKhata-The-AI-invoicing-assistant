@@ -20,6 +20,9 @@ const clean = (p) => {
 
 
 function Header({ path, user, onLogout, onOpenBusinessModal }) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const toggleMobile = () => setMobileOpen(!mobileOpen);
+  const closeMobile = () => setMobileOpen(false);
   const inApp = path.startsWith("/app");
   const isLogin = path === "/login";
 
@@ -32,6 +35,7 @@ function Header({ path, user, onLogout, onOpenBusinessModal }) {
           <b>BahiKhata</b>
         </Link>
         {/* Regular navigation (hidden on mobile) */}
+        <button className="nav-toggle" aria-label="Menu" onClick={toggleMobile}>☰</button>
         <nav className="nav">
           {isLogin ? (
             <Link to="/" className="btn top-btn-secondary">
@@ -127,6 +131,20 @@ function Header({ path, user, onLogout, onOpenBusinessModal }) {
             </>
           )}
         </nav>
+        {mobileOpen && (
+          <div className="mobile-nav open">
+            <button className="mobile-nav-close" aria-label="Close menu" onClick={closeMobile}>✕</button>
+            <Link to="/app/dashboard" className={path === "/app/dashboard" ? "on" : ""} onClick={closeMobile}>Dashboard</Link>
+            <Link to="/app" className={path === "/app" ? "on" : ""} onClick={closeMobile}>Studio</Link>
+            <Link to="/app/ledger" className={path === "/app/ledger" ? "on" : ""} onClick={closeMobile}>Ledger</Link>
+            <Link to="/app/insights" className={path === "/app/insights" ? "on" : ""} onClick={closeMobile}>AI Insights</Link>
+            {user ? (
+              <button className="btn top-btn-logout" onClick={() => { onLogout(); closeMobile(); }}>Sign Out</button>
+            ) : (
+              <Link to="/login" className="btn top-btn-secondary" onClick={closeMobile}>Sign In</Link>
+            )}
+          </div>
+        )}
 
       </div>
     </header>
@@ -160,6 +178,20 @@ export function Footer({ compact }) {
             <Link to="/terms">Terms</Link>
             <a href={`mailto:${CONTACT}`}>Contact</a>
           </nav>
+        {mobileOpen && (
+          <div className="mobile-nav open">
+            <button className="mobile-nav-close" aria-label="Close menu" onClick={closeMobile}>✕</button>
+            <Link to="/app/dashboard" className={path === "/app/dashboard" ? "on" : ""} onClick={closeMobile}>Dashboard</Link>
+            <Link to="/app" className={path === "/app" ? "on" : ""} onClick={closeMobile}>Studio</Link>
+            <Link to="/app/ledger" className={path === "/app/ledger" ? "on" : ""} onClick={closeMobile}>Ledger</Link>
+            <Link to="/app/insights" className={path === "/app/insights" ? "on" : ""} onClick={closeMobile}>AI Insights</Link>
+            {user ? (
+              <button className="btn top-btn-logout" onClick={() => { onLogout(); closeMobile(); }}>Sign Out</button>
+            ) : (
+              <Link to="/login" className="btn top-btn-secondary" onClick={closeMobile}>Sign In</Link>
+            )}
+          </div>
+        )}
         </div>
 
         {!compact && (
