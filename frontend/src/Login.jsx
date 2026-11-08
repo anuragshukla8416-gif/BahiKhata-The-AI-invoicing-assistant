@@ -71,6 +71,11 @@ export default function Login({ onLogin, redirectTarget }) {
   };
 
 
+  const handleDemoLogin = () => {
+    setStoredUser(DEMO_USER);
+    onLogin(DEMO_USER);
+  };
+
   const targetLabel = (() => {
     if (!redirectTarget || redirectTarget === "/" || redirectTarget === "/login") {
       return null;
