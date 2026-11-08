@@ -2,16 +2,35 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import App from "./App.jsx";
 import { getStoredUser, setStoredUser, clearStoredUser, DEMO_USER } from "./auth.js";
+import { supabase } from "./supabase.js";
 
 beforeEach(() => {
   localStorage.clear();
   window.history.pushState({}, "", "/");
+  vi.spyOn(supabase.auth, "signInWithPassword").mockImplementation(async ({ email, password }) => {
+    if (email === "testuser@bahikhata.in" && password === "secret123") {
+      return {
+        data: {
+          user: { id: "test-user-id", email: "testuser@bahikhata.in", user_metadata: { name: "Test User" } },
+          session: { access_token: "mock-token-123" }
+        },
+        error: null
+      };
+    }
+    return {
+      data: { user: null, session: null },
+      error: { message: "Invalid login credentials" }
+    };
+  });
+  vi.spyOn(supabase.auth, "signOut").mockResolvedValue({ error: null });
+  vi.spyOn(supabase.auth, "getSession").mockResolvedValue({ data: { session: null } });
 });
 
 afterEach(() => {
   cleanup();
   localStorage.clear();
   window.history.pushState({}, "", "/");
+  vi.restoreAllMocks();
 });
 
 test("unauthenticated user on landing page sees landing page and sign in button", () => {
@@ -20,9 +39,9 @@ test("unauthenticated user on landing page sees landing page and sign in button"
   expect(screen.getByText("Sign In")).toBeTruthy();
 });
 
-test("tapping 'Open Dashboard' from landing page when unauthenticated redirects to login", async () => {
+test("tapping 'Open BahiKhata' from landing page when unauthenticated redirects to login", async () => {
   render(<App />);
-  const dashboardLink = screen.getByText("Open Dashboard");
+  const dashboardLink = screen.getByText("Open BahiKhata");
   fireEvent.click(dashboardLink);
 
   await screen.findByRole("heading", { name: /Sign in to BahiKhata/i });
@@ -41,14 +60,14 @@ test("tapping 'Create an invoice' from landing page when unauthenticated redirec
 
 test("instant demo login logs user in and takes them to their target destination", async () => {
   render(<App />);
-  fireEvent.click(screen.getByText("Open Dashboard"));
+  fireEvent.click(screen.getByText("Open BahiKhata"));
 
   await screen.findByRole("heading", { name: /Sign in to BahiKhata/i });
   const demoBtn = screen.getByRole("button", { name: /Instant Demo Sign In/i });
   fireEvent.click(demoBtn);
 
   await waitFor(() => {
-    expect(window.location.pathname).toBe("/app/dashboard");
+    expect(window.location.pathname).toBe("/app");
   });
   expect(getStoredUser()).not.toBeNull();
   expect(screen.getByText("Sign Out")).toBeTruthy();
@@ -74,6 +93,25 @@ test("custom email and password login works properly", async () => {
   expect(user.email).toBe("testuser@bahikhata.in");
 });
 
+test("new or invalid email and password on Sign In is rejected with error message", async () => {
+  render(<App />);
+  fireEvent.click(screen.getByText("Sign In"));
+
+  await screen.findByRole("heading", { name: /Sign in to BahiKhata/i });
+  fireEvent.change(screen.getByLabelText(/Email Address/i), {
+    target: { value: "unknown@bahikhata.in" },
+  });
+  fireEvent.change(screen.getByLabelText(/^Password$/i), {
+    target: { value: "wrongpassword" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /Sign In to BahiKhata/i }));
+
+  const err = await screen.findByRole("alert");
+  expect(err.textContent).toMatch(/Unable to sign in/i);
+  expect(window.location.pathname).toBe("/login");
+  expect(getStoredUser()).toBeNull();
+});
+
 test("signing out clears stored user and returns to landing page", async () => {
   setStoredUser(DEMO_USER);
   window.history.pushState({}, "", "/app/dashboard");
@@ -88,7 +126,6 @@ test("signing out clears stored user and returns to landing page", async () => {
   expect(getStoredUser()).toBeNull();
   expect(screen.getByText("Sign In")).toBeTruthy();
 });
-
 
 test("tapping user name on top opens business information modal", async () => {
   setStoredUser(DEMO_USER);

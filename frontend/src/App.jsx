@@ -10,6 +10,7 @@ import { Privacy, Terms } from "./Legal.jsx";
 import { Mark } from "./ui.jsx";
 import { CONTACT, Link, NavContext } from "./nav.jsx";
 import { getStoredUser, setStoredUser, clearStoredUser } from "./auth.js";
+import { supabase } from "./supabase.js";
 
 const clean = (p) => {
   if (!p) return "/";
@@ -288,7 +289,12 @@ export default function App() {
     window.scrollTo(0, 0);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // ignore
+    }
     clearStoredUser();
     setUser(null);
     setShowBusinessModal(false);
