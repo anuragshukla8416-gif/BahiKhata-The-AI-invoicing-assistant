@@ -7,12 +7,32 @@ function errorText(detail) {
   return detail;
 }
 
-export async function api(path, body) {
+function getAuthHeader() {
+  try {
+    const raw = localStorage.getItem("bahikhata_user");
+    if (raw) {
+      const user = JSON.parse(raw);
+      if (user?.token) {
+        return { Authorization: `Bearer ${user.token}` };
+      }
+    }
+  } catch {
+    // Ignore invalid localStorage entries
+  }
+  return {};
+}
+
+export async function api(path, body, customMethod) {
   let res;
+  const method = customMethod || (body === undefined ? "GET" : "POST");
+  const headers = {
+    "Content-Type": "application/json",
+    ...getAuthHeader(),
+  };
   try {
     res = await fetch(API + path, {
-      method: body === undefined ? "GET" : "POST",
-      headers: { "Content-Type": "application/json" },
+      method,
+      headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
@@ -21,6 +41,14 @@ export async function api(path, body) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(errorText(data.detail) || res.statusText || "Something went wrong");
   return data;
+}
+
+export function apiPut(path, body) {
+  return api(path, body, "PUT");
+}
+
+export function apiDelete(path) {
+  return api(path, undefined, "DELETE");
 }
 
 export function money(n, currency = "USD") {

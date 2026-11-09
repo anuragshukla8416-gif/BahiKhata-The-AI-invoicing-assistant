@@ -282,6 +282,9 @@ export default function App() {
   const handleLogin = (userData) => {
     setStoredUser(userData);
     setUser(userData);
+    if (userData.is_new_user || userData.onboarding_completed === false) {
+      setShowBusinessModal(true);
+    }
     const destination =
       redirectTarget && redirectTarget !== "/login" && redirectTarget !== "/"
         ? redirectTarget
@@ -347,6 +350,7 @@ export default function App() {
       {showBusinessModal && user && (
         <BusinessModal
           user={user}
+          isOnboarding={user.onboarding_completed === false}
           onClose={() => setShowBusinessModal(false)}
           onUpdateUser={handleUpdateUser}
           onLogout={handleLogout}

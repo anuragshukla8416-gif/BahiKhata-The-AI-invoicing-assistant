@@ -4,6 +4,7 @@ import { Link } from "./nav.jsx";
 import { Mark } from "./ui.jsx";
 import { DEMO_USER, setStoredUser, clearStoredUser } from "./auth.js";
 import { supabase } from "./supabase.js";
+import { api } from "./lib.js";
 
 export default function Login({ onLogin, redirectTarget }) {
   const [mode, setMode] = useState("signin"); // "signin" | "signup"
@@ -53,28 +54,20 @@ export default function Login({ onLogin, redirectTarget }) {
           },
         });
 
-        // If Supabase free-tier SMTP hits outgoing email rate limit, complete creation with confirmed email
-        if (signUpError && (signUpError.message?.toLowerCase().includes("rate limit") || signUpError.status === 429)) {
-          if (supabase.auth?.admin?.createUser) {
-            const adminRes = await supabase.auth.admin.createUser({
+        // If Supabase free-tier SMTP hits outgoing email rate limit, complete creation with backend endpoint
+        if (
+          signUpError &&
+          (signUpError.message?.toLowerCase().includes("rate limit") ||
+            signUpError.message?.toLowerCase().includes("email limit") ||
+            signUpError.status === 429)
+        ) {
+          try {
+            await api("/api/auth/register", {
               email: cleanEmail,
               password: password,
-              email_confirm: true,
-              user_metadata: {
-                name: name.trim(),
-                business: business.trim(),
-              },
+              name: name.trim(),
+              business: business.trim(),
             });
-
-            if (adminRes.error) {
-              if (adminRes.error.message?.toLowerCase().includes("already")) {
-                setError("An account with this email address already exists. Please sign in.");
-              } else {
-                setError(adminRes.error.message || "Unable to create account.");
-              }
-              setLoading(false);
-              return;
-            }
 
             // Immediately authenticate the newly registered user
             const loginRes = await supabase.auth.signInWithPassword({
@@ -86,6 +79,10 @@ export default function Login({ onLogin, redirectTarget }) {
               data = loginRes.data;
               signUpError = null;
             }
+          } catch (regErr) {
+            setError(regErr.message || "Unable to create account.");
+            setLoading(false);
+            return;
           }
         }
 
@@ -103,6 +100,8 @@ export default function Login({ onLogin, redirectTarget }) {
             business: data.user.user_metadata?.business || business.trim(),
             token: data.session.access_token,
             loggedInAt: new Date().toISOString(),
+            is_new_user: true,
+            onboarding_completed: false,
           };
           setStoredUser(user);
           setLoading(false);
