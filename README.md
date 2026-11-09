@@ -10,8 +10,6 @@
 
 ---
 
-## ⚡ Quick Guide for Hackathon Judges & Evaluators
-
 Welcome judges! **BahiKhata** (*traditional Indian ledger / bookkeeping record*) solves a massive friction point for freelancers, solo consultants, and SMBs: **spending hours manually writing invoices, chasing late payments, and reconciling payment statuses.**
 
 ### 🎯 2-Minute Feature Walkthrough
