@@ -1,291 +1,229 @@
-# BahiKhata — The AI Invoicing Assistant
+# 📒 BahiKhata — The AI Invoicing Assistant
+> **Turn client notes into professional PayPal invoices in seconds. Track payments in real-time. Follow up automatically.**
 
-**Turn client notes into invoices. Track payments. Follow up automatically.**
+[![PayPal Hackathon](https://img.shields.io/badge/PayPal-AI%20Hackathon%202026-003087?style=for-the-badge&logo=paypal&logoColor=white)](https://developer.paypal.com/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/React-18+-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev)
+[![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL%20RLS-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com)
+[![Google Gemini](https://img.shields.io/badge/Google%20Gemini-AI%20Assistant-8E75C2?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
-BahiKhata is an AI-powered invoicing assistant designed to help freelancers and small businesses create PayPal invoices from natural-language notes, track payment status, and follow up on overdue invoices with AI-assisted reminders.
+---
 
-Built by Anurag Shukla for the PayPal AI Hackathon.
+## ⚡ Quick Guide for Hackathon Judges & Evaluators
 
-## ✨ Features
+Welcome judges! **BahiKhata** (*traditional Indian ledger / bookkeeping record*) solves a massive friction point for freelancers, solo consultants, and SMBs: **spending hours manually writing invoices, chasing late payments, and reconciling payment statuses.**
 
-* **AI-Powered Invoice Creation:** Convert natural-language client notes into structured invoice details using Google Gemini.
-* **PayPal Invoicing:** Create invoice drafts and send invoices through the PayPal Invoicing API.
-* **Invoice Ledger:** View invoices and track their payment status from a centralized dashboard.
-* **Payment Tracking:** Process PayPal webhooks to synchronize invoice statuses.
-* **AI-Assisted Reminders:** Generate payment reminder messages based on how overdue an invoice is.
-* **Automated Follow-Ups:** Process overdue invoices with configurable reminder intervals and limits.
-* **Tax Support:** Specify tax rates and tax labels for invoice line items.
-* **Responsive Interface:** Manage invoices through a modern React-based web application.
+### 🎯 2-Minute Feature Walkthrough
+1. **Instant Demo Login:** Click the **"Demo Login"** button on the sign-in screen to enter an already-populated business workspace with active invoices, payment history, and overdue records.
+2. **AI Natural Language Invoicing:**
+   - Go to **Create Invoice**.
+   - Paste a messy client brief such as:
+     > *"Brand identity & design sprint for Maya Rao (maya@studiokora.design). 4 days at 7500 per day, plus 3000 for font licenses. 18% GST, due in 10 days."*
+   - Click **"Parse with AI"**. Gemini extracts structured line items, customer details, tax rates, and due dates in seconds.
+3. **1-Click PayPal Dispatch:** Review the generated draft and hit **"Send with PayPal"**. BahiKhata communicates directly with the **PayPal Invoicing API**, creates the invoice draft, generates a secure payment link, and emails it to the client.
+4. **Real-Time Webhook Reconciliation:** When a payment is made or cancelled, the **PayPal Webhook Engine** automatically updates invoice status to `PAID`, records transaction logs in the ledger, and stops further reminder sequences.
+5. **Smart Overdue Follow-ups:** Open an overdue invoice and generate an **AI Follow-up**. The AI dynamically alters its communication tone based on lateness:
+   - **3–7 days overdue:** Polite, friendly reminder.
+   - **8–21 days overdue:** Firm, direct follow-up with balance reminder.
+   - **22+ days overdue:** Formal, professional demand for settlement.
+6. **Multi-Tenant Workspace & GSTIN Support:** Sign up as a brand-new user to experience the zero-data first-time onboarding flow, optional GSTIN validation, and strict database-level Row Level Security (RLS).
+
+---
+
+## 🌟 Key Features
+
+| Capability | Description |
+| :--- | :--- |
+| **🧠 AI Invoice Extraction** | Converts unstructured text notes, emails, and WhatsApp summaries into structured line items, quantities, rates, and tax calculations using **Google Gemini**. |
+| **💳 Deep PayPal Invoicing** | Full end-to-end integration with the **PayPal Invoicing API (v2)** for draft creation, dispatch, and hosted payment links. |
+| **🔄 Real-Time Webhook Engine** | Processes incoming PayPal invoice webhooks (`INVOICING.INVOICE.PAID`, `CANCELLED`, `REFUNDED`) with cryptographic signature validation. |
+| **📊 Interactive Financial Ledger** | Centralized dashboard powered by high-performance data grids for sorting, filtering, and tracking real-time accounts receivable. |
+| **🤖 Autonomous Chasing Engine** | Automated cron endpoint (`POST /api/chase-overdue`) that evaluates overdue invoices, enforces minimum contact gaps (e.g., 3 days), limits total reminders, and sends notices via PayPal. |
+| **🔒 Enterprise Multi-Tenancy** | Every business workspace is isolated using **Supabase Row-Level Security (RLS)** and server-verified Bearer JWT authentication. |
+| **🇮🇳 GST & Localization** | Built-in support for Indian GSTIN formatting and validation (with optional toggle), local timezone tracking (`Asia/Kolkata`), and multi-currency billing. |
+
+---
+
+## 🏗️ Architecture & Data Flow
+
+```mermaid
+flowchart TD
+    subgraph Client["Frontend (React 18 + Vite + Tailwind)"]
+        UI["BahiKhata Dashboard & Forms"]
+        AUTH["Supabase Auth Client"]
+    end
+
+    subgraph Backend["FastAPI Backend Service"]
+        API["FastAPI REST APIs"]
+        SEC["JWT & Tenant Workspace Resolver"]
+        AI_SVC["Gemini AI Extraction & Tone Engine"]
+        PP_SVC["PayPal Invoicing SDK & Webhook Handler"]
+        CRON["Automated Overdue Chaser"]
+    end
+
+    subgraph External["External Services & APIs"]
+        GEMINI["Google Gemini API"]
+        PAYPAL["PayPal Invoicing REST API"]
+        PP_HOOKS["PayPal Webhooks"]
+    end
+
+    subgraph Database["Supabase PostgreSQL (Multi-Tenant)"]
+        RLS["Row Level Security Policies"]
+        TB_BUS["businesses (Workspaces)"]
+        TB_INV["invoices (business_id scoped)"]
+        TB_CUST["customers (business_id scoped)"]
+        TB_PAY["payments & ledger"]
+    end
+
+    UI -->|1. Bearer Token + Request| API
+    AUTH <-->|Auth Tokens| UI
+    API --> SEC
+    SEC -->|Strict Tenant Query| RLS
+    RLS --- TB_BUS & TB_INV & TB_CUST & TB_PAY
+
+    API -->|Natural Notes| AI_SVC -->|Structured JSON| GEMINI
+    API -->|Create/Send Invoice| PP_SVC -->|Invoice API| PAYPAL
+    PP_HOOKS -->|Payment Events| PP_SVC
+    CRON -->|Daily Overdue Scan| API
+```
+
+---
+
+## 🛡️ Multi-Tenant Security & Data Isolation
+
+Data isolation is built directly into the database and backend:
+- **Zero-Trust Backend:** The backend never trusts client-supplied `business_id` or `user_id` values. Every request extracts and verifies the Supabase Auth JWT token, fetches the authenticated user's workspace, and scopes all queries strictly to that business.
+- **Postgres Row Level Security (RLS):** Every table (`businesses`, `invoices`, `customers`, `payments`, `ledger`, `reminders`) has active RLS policies ensuring that users can only select, insert, update, or delete records belonging to their business.
+- **Relational Integrity:** Foreign keys enforce that customers or invoices cannot be cross-referenced across different tenants.
+
+---
 
 ## 🛠️ Technology Stack
 
-| Component          | Technology                   |
-| ------------------ | ---------------------------- |
-| Frontend           | React, Vite, Tailwind CSS    |
-| Invoice Ledger     | AG Grid                      |
-| Backend            | Python, FastAPI              |
-| AI Model           | Google Gemini 3.1 Flash Lite |
-| Database           | Supabase PostgreSQL          |
-| Payment Processing | PayPal Invoicing API         |
-| Deployment         | Vercel and Render            |
+- **Frontend:** React 18, Vite, Tailwind CSS, Lucide Icons, AG Grid
+- **Backend:** Python 3.11+, FastAPI, Uvicorn, Pydantic v2
+- **Artificial Intelligence:** Google Gemini (Flash) for invoice structuring & adaptive reminder generation
+- **Payments:** PayPal Invoicing API v2, PayPal Webhooks, Sandbox Environment
+- **Database & Auth:** Supabase PostgreSQL with Row Level Security (RLS) & Supabase GoTrue Auth
+- **Deployment:** Render (Backend API), Vercel / Render Static (Frontend SPA)
 
-## 🏗️ Architecture
+---
 
-```mermaid
-flowchart LR
-    U[Freelancer] --> FE[React Frontend]
-    FE --> API[FastAPI Backend]
-    API --> AI[Gemini 3.1 Flash Lite]
-    API <--> DB[(Supabase PostgreSQL)]
-    API --> PP[PayPal Invoicing API]
-    PP -->|Webhooks| API
-    CRON[Daily Scheduler] -->|POST /api/chase-overdue| API
-```
-
-## 📁 Project Structure
+## 📁 Repository Structure
 
 ```text
-BahiKhata/
+bahikhata/
 ├── backend/
-│   ├── main.py
-│   ├── test_main.py
-│   ├── requirements.txt
-│   └── .env.example
+│   ├── main.py              # FastAPI endpoints, auth dependencies & business logic
+│   ├── test_main.py         # Automated test suite (60+ unit tests)
+│   ├── requirements.txt     # Python dependencies
+│   └── .env.example         # Template for environment variables
 ├── frontend/
-│   ├── src/
-│   ├── public/
-│   ├── package.json
-│   └── ui.test.jsx
-├── schema.sql
-├── render.yaml
-└── README.md
+│   ├── src/                 # React components, pages, Supabase client & API calls
+│   ├── public/              # Static assets & brand icons
+│   ├── package.json         # Node scripts & dependencies
+│   └── vite.config.js       # Vite configuration
+├── schema.sql               # Multi-tenant schema, RLS policies & indexes
+├── render.yaml              # Infrastructure-as-code for Render deployment
+└── README.md                # Project documentation
 ```
 
-## 🚀 Getting Started
+---
+
+## 🔌 API Reference
+
+| Method | Endpoint | Description | Auth Required |
+| :--- | :--- | :--- | :---: |
+| `POST` | `/api/parse` | Parse natural language text notes into structured invoice items | Yes |
+| `POST` | `/api/invoices` | Create a new invoice draft in BahiKhata and PayPal | Yes |
+| `GET` | `/api/invoices` | Retrieve tenant-scoped invoices and payment metrics | Yes |
+| `POST` | `/api/invoices/{id}/send` | Send invoice to customer via PayPal Invoicing API | Yes |
+| `POST` | `/api/invoices/{id}/followup` | Generate AI payment reminder tailored to overdue duration | Yes |
+| `POST` | `/api/invoices/{id}/remind` | Dispatch payment reminder through PayPal | Yes |
+| `POST` | `/webhooks/paypal` | Ingest and verify PayPal invoice webhook events | Webhook Sig |
+| `POST` | `/api/chase-overdue` | Automated batch overdue invoice processor (for cron) | `x-cron-secret` |
+
+---
+
+## 🚀 Local Development Setup
 
 ### Prerequisites
+- **Python 3.10+**
+- **Node.js 18+**
+- **Supabase Account** ([supabase.com](https://supabase.com))
+- **PayPal Developer Account** ([developer.paypal.com](https://developer.paypal.com))
+- **Google Gemini API Key** ([aistudio.google.com](https://aistudio.google.com))
 
-* Python 3.11 or newer
-* Node.js 18 or newer
-* A Supabase account
-* A PayPal Developer account
-* An API key for Google Gemini
+### 1. Database Setup (Supabase)
+1. Create a new project in Supabase.
+2. In the Supabase SQL Editor, run the contents of [`schema.sql`](schema.sql).
+3. Copy your project URL, Anon Key, and Service Role Key from **Project Settings > API**.
 
-### 1. Configure Supabase
-
-1. Create a Supabase project.
-2. Open the SQL Editor in your project dashboard.
-3. Execute the SQL statements in `schema.sql`.
-4. Obtain your project URL and the required service key from the project settings.
-
-**Security:** Keep your service key private. Never expose it in frontend code or commit it to a public repository.
-
-### 2. Configure PayPal Sandbox
-
-1. Open the PayPal Developer Dashboard.
-2. Create a sandbox application.
-3. Copy the sandbox client ID and secret.
-4. Keep these credentials for the backend configuration.
-
-### 3. Configure the Backend
-
-From the project root, open a terminal and run:
-
+### 2. Backend Setup
 ```bash
 cd backend
 python -m venv .venv
-```
 
-Activate the virtual environment.
-
-**Windows PowerShell:**
-
-```powershell
+# On Windows:
 .venv\Scripts\Activate.ps1
-```
-
-**Linux/macOS:**
-
-```bash
+# On macOS/Linux:
 source .venv/bin/activate
-```
 
-Install the dependencies:
-
-```bash
-python -m pip install -r requirements.txt
-```
-
-Create your environment file.
-
-**Windows PowerShell:**
-
-```powershell
-Copy-Item .env.example .env
-```
-
-**Linux/macOS:**
-
-```bash
+pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Populate `.env` using the variable names in `backend/.env.example`. Configure the required Gemini API key, Supabase credentials, PayPal sandbox credentials, frontend origin, and cron secret.
-
-Start the backend:
-
-```bash
-uvicorn main:app --reload
+Configure your `.env` variables:
+```env
+OPENAI_API_KEY=your_gemini_or_ai_key
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_KEY=your_supabase_service_role_key
+PAYPAL_CLIENT_ID=your_paypal_sandbox_client_id
+PAYPAL_SECRET=your_paypal_sandbox_secret
+PAYPAL_WEBHOOK_ID=your_webhook_id
+FRONTEND_ORIGIN=http://localhost:5173
+CRON_SECRET=super_secret_cron_key
 ```
 
-The API should be available at:
+Start the server:
+```bash
+uvicorn main:app --reload --port 8000
+```
+API Documentation will be live at `http://localhost:8000/docs`.
 
-`http://localhost:8000`
-
-### 4. Configure the Frontend
-
-Open a second terminal from the project root:
-
+### 3. Frontend Setup
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
+Open `http://localhost:5173` in your browser.
 
-Open the development URL printed by Vite, typically:
-
-`http://localhost:5173`
-
-Ensure the frontend's API configuration points to the local FastAPI backend.
-
-### 5. Configure PayPal Webhooks
-
-PayPal requires a publicly accessible webhook endpoint.
-
-1. Deploy the backend or expose it through a secure development tunnel.
-2. Open your PayPal sandbox application.
-3. Register the public endpoint ending in `/webhooks/paypal`.
-4. Subscribe to the invoice events supported by the backend.
-5. Configure the resulting webhook ID in the backend environment.
-
-**Important:** Keep webhook signature verification enabled in deployed environments. Any verification bypass should be restricted to controlled local testing.
-
-## 💡 Using BahiKhata
-
-### Create an Invoice
-
-1. Open the application.
-2. Enter natural-language notes describing the client, work performed, pricing, taxes, and payment deadline.
-3. Use the AI parsing feature to extract the invoice details.
-4. Review the generated information and correct anything necessary.
-5. Create the invoice draft through PayPal.
-6. Send the invoice to your client.
-
-Example input:
-
-```text
-Brand identity for Meera Shah (meera@studiokora.in),
-3 days at 8000 a day, plus 2500 for print files.
-18% GST, due in 15 days.
-```
-
-### Track Payments
-
-1. Open the invoice ledger.
-2. Review invoice details and payment statuses.
-3. Complete a payment using a PayPal sandbox buyer account.
-4. Verify that the corresponding webhook updates the invoice status.
-
-### Send Payment Reminders
-
-1. Select an eligible overdue invoice.
-2. Generate a payment reminder.
-3. Review and edit the reminder message.
-4. Send it through PayPal.
-
-For testing automated reminders, use a sandbox invoice with an appropriate overdue date.
-
-## 🔔 Automated Overdue Follow-Ups
-
-BahiKhata provides the following endpoint for processing overdue invoices:
-
-`POST /api/chase-overdue`
-
-The backend supports configurable reminder intervals, reminder limits, escalation based on lateness, and protection against duplicate sends.
-
-The endpoint requires the `x-cron-secret` header to match the configured `CRON_SECRET`.
-
-Example:
-
-```bash
-curl -X POST \
-  -H "x-cron-secret: YOUR_CRON_SECRET" \
-  https://YOUR-API-URL/api/chase-overdue
-```
-
-A trusted scheduler can call this endpoint periodically. Configure the schedule and timeout according to your hosting environment.
-
-## 🔌 API Reference
-
-| Endpoint                           | Description                                                    |
-| ---------------------------------- | -------------------------------------------------------------- |
-| `POST /api/parse`                  | Convert natural-language notes into structured invoice details |
-| `POST /api/invoices`               | Validate and create an invoice                                 |
-| `POST /api/invoices/{id}/send`     | Send an invoice through PayPal                                 |
-| `GET /api/invoices`                | Retrieve invoices and payment information                      |
-| `POST /webhooks/paypal`            | Process PayPal invoice events                                  |
-| `POST /api/invoices/{id}/followup` | Generate an AI-assisted payment reminder                       |
-| `POST /api/invoices/{id}/remind`   | Send a reminder through PayPal                                 |
-| `POST /api/chase-overdue`          | Process overdue invoices for automated follow-up               |
+---
 
 ## 🧪 Testing
 
-### Backend Tests
-
-From the project root, activate your virtual environment and run:
-
+Run backend tests:
 ```bash
-python -m pytest backend/test_main.py -v
+cd backend
+pytest test_main.py -v
 ```
 
-### Frontend Tests
+The test suite validates:
+- Invoice creation & schema validation
+- AI extraction normalization & fallback mechanisms
+- PayPal webhook status transitions & idempotency
+- Escalating AI reminder tone based on aging (3, 10, 30 days)
+- Double-send protection & claim locking
 
-Run the test command configured in `frontend/package.json`.
+---
 
-The repository includes automated tests for invoice validation, payment status handling, webhook processing, reminder behavior, tax calculations, and other application workflows.
+## 👥 Authors & Acknowledgments
 
-Test results depend on environment configuration and mocked integrations. Passing automated tests alone does not guarantee that every live integration has been verified.
+- **Developed by:** Anurag Shukla
+- **Event:** PayPal AI Hackathon
+- **Special Thanks:** Built using PayPal Invoicing APIs, Google Gemini, and Supabase.
 
-## 🌐 Deployment
-
-The frontend and backend can be deployed separately.
-
-Before deploying:
-
-1. Configure the required environment variables in the hosting provider.
-2. Set the frontend API URL to the deployed backend.
-3. Configure the backend's allowed frontend origins.
-4. Register the deployed webhook URL in the PayPal application.
-5. Keep webhook signature verification enabled.
-6. Test invoice creation, sending, payment updates, and reminders using the sandbox.
-
-For custom domains, follow your hosting provider's DNS instructions and verify HTTPS before sharing the application.
-
-## ⚠️ Known Limitations
-
-* **Authentication:** If authentication is not enabled, application data may be accessible to other visitors. Access controls should be implemented and verified before handling confidential customer information.
-* **Sandbox Payments:** Sandbox credentials are intended for testing. Live transactions require appropriate PayPal live credentials and configuration.
-* **Tax Compliance:** Tax rates and labels are invoice inputs. Users are responsible for determining the applicable tax treatment.
-* **Legal Documents:** Privacy and terms pages should be reviewed before the application is used with real customers.
-* **AI Accuracy:** Generated invoice details and reminders should be reviewed before they are sent to clients.
-
-## 🤖 AI Disclosure
-
-BahiKhata uses **Google Gemini 3.1 Flash Lite** to interpret natural-language invoice notes and assist with payment reminder generation.
-
-AI-generated information is presented for user review before invoices and reminders are sent.
-
-## 📄 License
-
-See the repository's `LICENSE` file for the applicable open-source license.
- 
+---
+*Built with ❤️ to empower freelancers and small businesses everywhere.*
