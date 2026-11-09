@@ -146,4 +146,14 @@ def test_multitenant_scenario_isolation_and_flow():
     custs_b = client.get("/api/customers", headers=headers_b).json()
     assert len(custs_b) == 0
 
+    # 10. Test Demo User Login Experience
+    demo_headers = {"Authorization": "Bearer demo_token_anurag_shukla"}
+    demo_prof = client.get("/api/business/profile", headers=demo_headers)
+    assert demo_prof.status_code == 200, demo_prof.text
+    assert demo_prof.json()["business_name"] == "Shukla Studio & Accounts"
+    assert demo_prof.json()["business_email"] == "anurag@bahikhata.in"
+
+    demo_invs = client.get("/api/invoices", headers=demo_headers)
+    assert demo_invs.status_code == 200, demo_invs.text
+
     print("All multi-tenant data isolation and onboarding tests passed successfully!")

@@ -132,6 +132,8 @@ def clean_notes(notes: str | None) -> str:
 
 
 TEST_USERS = {}
+DEMO_USER_ID = "00000000-0000-0000-0000-000000000001"
+DEMO_BUSINESS_ID = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"bahikhata.business.{DEMO_USER_ID}"))
 
 
 def get_current_user(authorization: str = Header(None)):
@@ -139,7 +141,7 @@ def get_current_user(authorization: str = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
         if is_test:
             return {
-                "id": "00000000-0000-0000-0000-000000000001",
+                "id": DEMO_USER_ID,
                 "email": "test@bahikhata.in",
                 "user_metadata": {
                     "name": "Test User",
@@ -150,6 +152,17 @@ def get_current_user(authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Authentication required. Please sign in.")
 
     token = authorization.split(" ", 1)[1].strip()
+    if token.startswith("demo_token_"):
+        return {
+            "id": DEMO_USER_ID,
+            "email": "anurag@bahikhata.in",
+            "user_metadata": {
+                "name": "Anurag Shukla",
+                "business": "Shukla Studio & Accounts",
+                "onboarding_completed": True,
+            },
+        }
+
     if is_test and token in TEST_USERS:
         return TEST_USERS[token]
     if is_test and token.startswith("test-token-"):
@@ -179,6 +192,28 @@ def resolve_business(user):
     user_id = str(getattr(user, "id", None) or (user.get("id") if isinstance(user, dict) else ""))
     user_email = str(getattr(user, "email", None) or (user.get("email") if isinstance(user, dict) else ""))
     metadata = getattr(user, "user_metadata", None) or (user.get("user_metadata") if isinstance(user, dict) else {}) or {}
+
+    if user_id == DEMO_USER_ID:
+        return {
+            "id": DEMO_BUSINESS_ID,
+            "owner_id": DEMO_USER_ID,
+            "business_name": "Shukla Studio & Accounts",
+            "business_type": "Freelancer / Service Provider",
+            "business_email": "anurag@bahikhata.in",
+            "business_phone": "+91 (080) 4123-8890",
+            "business_address": "12/4 MG Road",
+            "city": "Bengaluru",
+            "state": "Karnataka",
+            "postal_code": "560001",
+            "country": "India",
+            "gst_registered": True,
+            "gstin": "29AABCU9603R1ZM",
+            "pan": "AABCU9603R",
+            "currency": "INR",
+            "tax_name": "GST",
+            "tax_rate": 18.0,
+            "onboarding_completed": True,
+        }
 
     # 1. Look up in businesses table if it exists
     try:
@@ -227,6 +262,20 @@ def resolve_business(user):
 
 
 def get_business_invoices(business_id: str):
+    if business_id == DEMO_BUSINESS_ID:
+        try:
+            res = db.table("invoices").select("*").order("created_at", desc=True).limit(500).execute()
+            rows = [
+                r for r in res.data
+                if not r.get("business_id") or r.get("business_id") == DEMO_BUSINESS_ID or f"[bid:{DEMO_BUSINESS_ID}]" in str(r.get("notes") or "")
+            ]
+            for r in rows:
+                r["business_id"] = DEMO_BUSINESS_ID
+                r["notes"] = clean_notes(r.get("notes"))
+            return rows
+        except Exception as e:
+            log.debug("Demo invoice query error: %r", e)
+
     try:
         res = db.table("invoices").select("*").eq("business_id", business_id).order("created_at", desc=True).limit(500).execute()
         rows = res.data
@@ -391,6 +440,9 @@ def ask_gpt(system, user, temperature):
 def check_business_ownership(row, business_id):
     if not business_id:
         return
+    if business_id == DEMO_BUSINESS_ID:
+        if not row.get("business_id") or row.get("business_id") == DEMO_BUSINESS_ID:
+            return
     row_bid = row.get("business_id")
     notes_str = str(row.get("notes") or "")
     tag_match = f"[bid:{business_id}]" in notes_str

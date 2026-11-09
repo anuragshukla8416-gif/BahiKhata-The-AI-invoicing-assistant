@@ -5,10 +5,12 @@ const USERS_KEY = "bahikhata_users";
 import { simpleHash } from "./hash.js";
 
 export const DEMO_USER = {
+  id: "00000000-0000-0000-0000-000000000001",
   name: "Anurag Shukla",
   email: "anurag@bahikhata.in",
   business: "Shukla Studio & Accounts",
-  token: "demo_token_" + Date.now(),
+  token: "demo_token_anurag_shukla",
+  onboarding_completed: true,
   loggedInAt: new Date().toISOString(),
 };
 
