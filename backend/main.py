@@ -1,648 +1,136 @@
-import openai
-import sys
+"""
+BahiKhata — The AI Invoicing Assistant Backend
+FastAPI application router providing REST APIs for authentication, invoice drafting,
+PayPal integration, webhook processing, AI extraction, and financial insights.
+"""
+
 import hmac
 import json
 import logging
 import os
 import re
+import sys
 import time
 import uuid
 from datetime import date, datetime, timezone
-from decimal import ROUND_HALF_UP, Decimal
-from zoneinfo import ZoneInfo
+from decimal import Decimal
 
 import httpx
-from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from google import genai
-from pydantic import BaseModel, EmailStr, Field
-from supabase import create_client
 
-env_file = os.path.join(os.path.dirname(__file__), ".env")
-load_dotenv(env_file) if os.path.exists(env_file) else load_dotenv()
+# Core configuration & clients
+from config import (
+    DEMO_BUSINESS_ID,
+    DEMO_USER_ID,
+    MAX_PER_RUN,
+    MAX_REMINDERS,
+    PAID,
+    PARSE_PROMPT,
+    PAYPAL,
+    REMINDER_GAP_DAYS,
+    SENDER,
+    STATUS_BY_EVENT,
+    TONES,
+    TZ,
+    UNPAID,
+    _INSIGHTS_CACHE,
+    _SCHEMA_CACHE,
+    ai,
+    db,
+    log,
+)
 
-log = logging.getLogger("uvicorn.error")
 
-PAYPAL = os.getenv("PAYPAL_BASE_URL", "https://api-m.sandbox.paypal.com")
-SENDER = os.getenv("SENDER_NAME", "Accounts")
-TZ = ZoneInfo(os.getenv("APP_TIMEZONE", "Asia/Kolkata"))
-MAX_REMINDERS = 5
-MAX_PER_RUN = 20
-REMINDER_GAP_DAYS = int(os.getenv("REMINDER_GAP_DAYS", "3"))
-UNPAID = {"SENT", "UNPAID", "PARTIALLY_PAID"}
-PAID = {"PAID", "MARKED_AS_PAID"}
-STATUS_BY_EVENT = {
-    "INVOICING.INVOICE.PAID": "PAID",
-    "INVOICING.INVOICE.CANCELLED": "CANCELLED",
-    "INVOICING.INVOICE.REFUNDED": "REFUNDED",
-}
-TONES = [
-    "friendly and light, assume it simply slipped their mind",
-    "polite but firm, say this is a follow-up and ask for a payment date",
-    "formal final notice, state that the invoice is seriously overdue and that further action may follow",
-]
-PARSE_PROMPT = """You extract invoice data from a freelancer's messy notes.
-Return a JSON object with exactly these keys:
-client_name (string), client_email (string),
-currency (3-letter ISO code: INR for rupees, USD for dollars, default USD),
-tax_name ("GST" or "IGST", default "GST"),
-items (array of {name, quantity, unit_price, tax_rate}) where tax_rate is the tax percentage for that line (0 if none is mentioned),
-due_date (YYYY-MM-DD), notes (string).
-Resolve relative terms like "net 15" or "end of month" from today's date.
-Use null for anything the notes don't state. Never guess an email address, a price or a tax rate."""
+# Pydantic schemas
+from models import (
+    BusinessProfileUpdate,
+    CustomerCreate,
+    Invoice,
+    Item,
+    Notes,
+    RegisterRequest,
+    Reminder,
+)
 
-ai = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", "dummy_key"))
-db = create_client(os.environ.get("SUPABASE_URL", "http://localhost:54321"), os.environ.get("SUPABASE_SERVICE_KEY", "dummy_key"))
+# Calculation & database helpers
+from helpers import (
+    cents,
+    check_business_ownership,
+    chase_target,
+    clean_notes,
+    deterministic_priority_key,
+    fallback_priority_reason,
+    get_row,
+    invoice_total,
+    iso_date,
+    normalize_invoice_status,
+    num,
+    number,
+    overdue_days,
+    parse_ts,
+    remaining_invoice_amount,
+    update_row,
+)
 
-app = FastAPI(title="BahiKhata API")
+
+def today():
+    """Current date in configured application timezone (Asia/Kolkata)."""
+    return datetime.now(TZ).date()
+
+
+# Authentication & multi-tenant business resolution
+from auth import (
+    TEST_USERS,
+    get_business_invoices,
+    get_current_user,
+    resolve_business,
+)
+
+# PayPal API client & webhook verification
+from paypal_client import (
+    _token,
+    handle_event,
+    paypal,
+    paypal_error,
+    paypal_token,
+    verified,
+)
+
+# AI extraction & tone generation
+from ai_service import (
+    ask_gpt,
+    deliver_reminder,
+    parse_notes_locally,
+    write_email,
+)
+
+# Initialize FastAPI application
+app = FastAPI(
+    title="BahiKhata API",
+    description="Intelligent AI invoicing & accounts receivable assistant powered by Google Gemini and PayPal.",
+    version="2.0.0",
+)
+
+# Configure Cross-Origin Resource Sharing (CORS)
+origins = [o.strip().rstrip("/") for o in os.getenv("FRONTEND_ORIGIN", "http://localhost:5173").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        o.strip().rstrip("/") for o in os.getenv("FRONTEND_ORIGIN", "http://localhost:5173").split(",") if o.strip()
-    ],
+    allow_origins=origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-class Notes(BaseModel):
-    text: str = Field(min_length=5, max_length=5000)
-
-
-class Item(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-    quantity: float = Field(gt=0, le=1_000_000)
-    unit_price: float = Field(ge=0, le=100_000_000)
-    tax_rate: float = Field(0, ge=0, le=100)
-
-
-class Invoice(BaseModel):
-    client_name: str = Field(min_length=1, max_length=140)
-    client_email: EmailStr
-    currency: str = Field("USD", pattern=r"^[A-Z]{3}$")
-    tax_name: str = Field("GST", pattern=r"^(GST|IGST)$")
-    items: list[Item] = Field(min_length=1, max_length=50)
-    due_date: date
-    notes: str = Field("", max_length=2000)
-
-
-class Reminder(BaseModel):
-    subject: str = Field(min_length=1, max_length=255)
-    body: str = Field(min_length=1, max_length=4000)
-
-
-class BusinessProfileUpdate(BaseModel):
-    business_name: str = Field(min_length=1, max_length=150)
-    business_type: str = Field(default="Freelancer / Service Provider", max_length=100)
-    business_email: EmailStr
-    business_phone: str = Field(default="", max_length=50)
-    business_address: str = Field(default="", max_length=300)
-    city: str = Field(default="", max_length=100)
-    state: str = Field(default="", max_length=100)
-    postal_code: str = Field(default="", max_length=20)
-    country: str = Field(default="India", max_length=100)
-    gst_registered: bool = False
-    gstin: str | None = None
-    pan: str = Field(default="", max_length=20)
-    currency: str = Field(default="INR", pattern=r"^[A-Z]{3}$")
-    tax_name: str = Field(default="GST", pattern=r"^(GST|IGST)$")
-    tax_rate: float = Field(default=18.0, ge=0, le=100)
-
-
-class CustomerCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=150)
-    email: EmailStr
-    phone: str = Field(default="", max_length=50)
-    address: str = Field(default="", max_length=300)
-
-
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=4)
-    name: str = Field(min_length=1)
-    business: str = Field(default="")
-
-
-def clean_notes(notes: str | None) -> str:
-    if not notes:
-        return ""
-    return re.sub(r"\s*\[bid:[0-9a-fA-F-]+\]", "", str(notes)).strip()
-
-
-TEST_USERS = {}
-DEMO_USER_ID = "00000000-0000-0000-0000-000000000001"
-DEMO_BUSINESS_ID = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"bahikhata.business.{DEMO_USER_ID}"))
-
-_SCHEMA_CACHE = {
-    "has_businesses_table": True,
-    "has_invoices_bid": True,
-    "businesses_checked_at": 0.0,
-    "invoices_bid_checked_at": 0.0,
-}
-_INSIGHTS_CACHE = {}
-
-
-def get_current_user(authorization: str = Header(None)):
-    is_test = "pytest" in sys.modules or "test_main" in sys.modules or os.environ.get("TESTING") == "1" or os.environ.get("SUPABASE_URL") == "http://x"
-    if not authorization or not authorization.startswith("Bearer "):
-        if is_test:
-            return {
-                "id": DEMO_USER_ID,
-                "email": "test@bahikhata.in",
-                "user_metadata": {
-                    "name": "Test User",
-                    "business": "Test Studio",
-                    "onboarding_completed": True,
-                },
-            }
-        raise HTTPException(status_code=401, detail="Authentication required. Please sign in.")
-
-    token = authorization.split(" ", 1)[1].strip()
-    if token.startswith("demo_token_"):
-        return {
-            "id": DEMO_USER_ID,
-            "email": "anurag@bahikhata.in",
-            "user_metadata": {
-                "name": "Anurag Shukla",
-                "business": "Shukla Studio & Accounts",
-                "onboarding_completed": True,
-            },
-        }
-
-    if is_test and token in TEST_USERS:
-        return TEST_USERS[token]
-    if is_test and token.startswith("test-token-"):
-        uid = token.replace("test-token-", "")
-        return {
-            "id": uid,
-            "email": f"{uid}@example.com",
-            "user_metadata": {
-                "name": f"User {uid}",
-                "business": f"Business {uid}",
-            },
-        }
-
-    try:
-        user_res = db.auth.get_user(token)
-        if not user_res or not user_res.user:
-            raise HTTPException(status_code=401, detail="Invalid session token.")
-        return user_res.user
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.warning("Supabase token verification failed: %r", e)
-        raise HTTPException(status_code=401, detail="Authentication failed or token expired.")
-
-
-def resolve_business(user):
-    user_id = str(getattr(user, "id", None) or (user.get("id") if isinstance(user, dict) else ""))
-    user_email = str(getattr(user, "email", None) or (user.get("email") if isinstance(user, dict) else ""))
-    metadata = getattr(user, "user_metadata", None) or (user.get("user_metadata") if isinstance(user, dict) else {}) or {}
-
-    if user_id == DEMO_USER_ID:
-        return {
-            "id": DEMO_BUSINESS_ID,
-            "owner_id": DEMO_USER_ID,
-            "business_name": "Shukla Studio & Accounts",
-            "business_type": "Freelancer / Service Provider",
-            "business_email": "anurag@bahikhata.in",
-            "business_phone": "+91 (080) 4123-8890",
-            "business_address": "12/4 MG Road",
-            "city": "Bengaluru",
-            "state": "Karnataka",
-            "postal_code": "560001",
-            "country": "India",
-            "gst_registered": True,
-            "gstin": "29AABCU9603R1ZM",
-            "pan": "AABCU9603R",
-            "currency": "INR",
-            "tax_name": "GST",
-            "tax_rate": 18.0,
-            "onboarding_completed": True,
-        }
-
-    # 1. Look up in businesses table if it exists
-    now = time.time()
-    can_query_businesses = _SCHEMA_CACHE["has_businesses_table"] or (now - _SCHEMA_CACHE["businesses_checked_at"] > 300)
-    if can_query_businesses:
-        try:
-            res = db.table("businesses").select("*").eq("owner_id", user_id).limit(1).execute()
-            _SCHEMA_CACHE["has_businesses_table"] = True
-            _SCHEMA_CACHE["businesses_checked_at"] = now
-            if res.data:
-                return res.data[0]
-        except Exception as e:
-            err_str = str(e)
-            if "PGRST205" in err_str or "schema cache" in err_str:
-                _SCHEMA_CACHE["has_businesses_table"] = False
-                _SCHEMA_CACHE["businesses_checked_at"] = now
-            log.debug("businesses table lookup skipped: %r", e)
-
-    # 2. Derive business workspace from metadata or default
-    deterministic_bid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"bahikhata.business.{user_id}"))
-    bname = metadata.get("business") or metadata.get("business_name") or (f"{metadata.get('name', 'My')}'s Business" if metadata.get("name") else "My Business")
-    
-    default_business = {
-        "id": deterministic_bid,
-        "owner_id": user_id,
-        "business_name": bname,
-        "business_type": metadata.get("business_type") or "Freelancer / Service Provider",
-        "business_email": metadata.get("business_email") or user_email,
-        "business_phone": metadata.get("business_phone") or metadata.get("phone") or "",
-        "business_address": metadata.get("business_address") or metadata.get("address") or "",
-        "city": metadata.get("city") or "",
-        "state": metadata.get("state") or "",
-        "postal_code": metadata.get("postal_code") or "",
-        "country": metadata.get("country") or "India",
-        "gst_registered": bool(metadata.get("gst_registered", False)),
-        "gstin": metadata.get("gstin") if metadata.get("gst_registered") else None,
-        "pan": metadata.get("pan") or "",
-        "currency": metadata.get("currency") or "INR",
-        "tax_name": metadata.get("tax_name") or "GST",
-        "tax_rate": float(metadata.get("tax_rate", 18.0)),
-        "onboarding_completed": bool(metadata.get("onboarding_completed", False)),
-    }
-
-    # Attempt to insert into businesses table if table exists
-    if _SCHEMA_CACHE["has_businesses_table"]:
-        try:
-            insert_data = dict(default_business)
-            insert_data.pop("onboarding_completed", None)
-            insert_res = db.table("businesses").insert(insert_data).execute()
-            if insert_res.data:
-                return insert_res.data[0]
-        except Exception:
-            pass
-
-    return default_business
-
-
-def get_business_invoices(business_id: str):
-    if business_id == DEMO_BUSINESS_ID:
-        try:
-            res = db.table("invoices").select("*").order("created_at", desc=True).limit(500).execute()
-            rows = [
-                r for r in res.data
-                if not r.get("business_id") or r.get("business_id") == DEMO_BUSINESS_ID or f"[bid:{DEMO_BUSINESS_ID}]" in str(r.get("notes") or "")
-            ]
-            for r in rows:
-                r["business_id"] = DEMO_BUSINESS_ID
-                r["notes"] = clean_notes(r.get("notes"))
-            return rows
-        except Exception as e:
-            log.debug("Demo invoice query error: %r", e)
-
-    can_query_bid = _SCHEMA_CACHE["has_invoices_bid"] or (time.time() - _SCHEMA_CACHE["invoices_bid_checked_at"] > 300)
-    if can_query_bid:
-        try:
-            res = db.table("invoices").select("*").eq("business_id", business_id).order("created_at", desc=True).limit(500).execute()
-            _SCHEMA_CACHE["has_invoices_bid"] = True
-            _SCHEMA_CACHE["invoices_bid_checked_at"] = time.time()
-            rows = res.data
-        except Exception as e:
-            err_str = str(e)
-            if "PGRST204" in err_str or "PGRST205" in err_str or "column" in err_str:
-                _SCHEMA_CACHE["has_invoices_bid"] = False
-                _SCHEMA_CACHE["invoices_bid_checked_at"] = time.time()
-            log.debug("Direct business_id query failed, checking tags: %r", e)
-            all_rows = db.table("invoices").select("*").order("created_at", desc=True).limit(500).execute().data
-            rows = [
-                r for r in all_rows
-                if r.get("business_id") == business_id or f"[bid:{business_id}]" in str(r.get("notes") or "")
-            ]
-    else:
-        all_rows = db.table("invoices").select("*").order("created_at", desc=True).limit(500).execute().data
-        rows = [
-            r for r in all_rows
-            if r.get("business_id") == business_id or f"[bid:{business_id}]" in str(r.get("notes") or "")
-        ]
-    for r in rows:
-        r["business_id"] = r.get("business_id") or business_id
-        r["notes"] = clean_notes(r.get("notes"))
-    return rows
-
-
-_token = {"value": None, "expires": 0.0}
-
-
-def today():
-    return datetime.now(TZ).date()
-
-
-def num(x):
-    return format(Decimal(str(x)).normalize(), "f")
-
-
-def cents(x):
-    return x.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-
-def invoice_total(items):
-    total = Decimal(0)
-    for i in items:
-        line = cents(Decimal(str(i.quantity)) * Decimal(str(i.unit_price)))
-        total += line + cents(line * Decimal(str(i.tax_rate)) / 100)
-    return total
-
-
-def paypal_token():
-    if _token["value"] and time.time() < _token["expires"] - 60:
-        return _token["value"]
-    try:
-        r = httpx.post(
-            f"{PAYPAL}/v1/oauth2/token",
-            auth=(os.environ["PAYPAL_CLIENT_ID"], os.environ["PAYPAL_SECRET"]),
-            data={"grant_type": "client_credentials"},
-            timeout=30,
-        )
-        r.raise_for_status()
-        data = r.json()
-    except httpx.HTTPError as e:
-        log.error("PayPal auth failed: %s", e)
-        raise HTTPException(502, "Could not sign in to PayPal. Check PAYPAL_CLIENT_ID, PAYPAL_SECRET and PAYPAL_BASE_URL.")
-    _token.update(value=data["access_token"], expires=time.time() + data["expires_in"])
-    return _token["value"]
-
-
-def paypal_error(r):
-    text = ""
-    try:
-        body = r.json()
-        if isinstance(body, dict):
-            parts = [body.get("message") or body.get("error_description") or body.get("name") or ""]
-            parts += [d.get("description") or d.get("issue") or "" for d in body.get("details") or [] if isinstance(d, dict)]
-            text = " ".join(p for p in parts if p)
-    except ValueError:
-        pass
-    return f"PayPal error {r.status_code}: {(text or r.text)[:400]}"
-
-
-def paypal(method, path, **kwargs):
-    headers = {
-        "Authorization": f"Bearer {paypal_token()}",
-        **kwargs.pop("headers", {}),
-    }
-
-    try:
-        r = httpx.request(
-            method,
-            PAYPAL + path,
-            headers=headers,
-            timeout=30,
-            **kwargs,
-        )
-    except httpx.HTTPError as e:
-        log.error("PayPal request failed: %s %s %s", method, path, e)
-        raise HTTPException(
-            502,
-            "PayPal did not respond. Try again in a moment.",
-        )
-
-    if r.status_code >= 400:
-        log.error(
-            "PayPal %s %s failed: %s %s",
-            method,
-            path,
-            r.status_code,
-            r.text[:500],
-        )
-        raise HTTPException(502, paypal_error(r))
-
-    return r.json() if r.content else {}
-
-
-def ask_gpt(system, user, temperature):
-    is_test = "pytest" in sys.modules or "test_main" in sys.modules or os.environ.get("TESTING") == "1"
-    if is_test:
-        client = openai.OpenAI()
-        try:
-            res = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-                response_format={"type": "json_object"},
-                temperature=temperature,
-            )
-            raw = res.choices[0].message.content
-            if not raw or not isinstance(raw, str):
-                raise HTTPException(status_code=502, detail="AI service returned invalid response format.")
-            data = json.loads(raw)
-            if not isinstance(data, dict):
-                raise HTTPException(status_code=502, detail="AI response was not a JSON object.")
-            return data
-        except HTTPException:
-            raise
-        except Exception:
-            raise HTTPException(
-                status_code=502,
-                detail="AI service unavailable. Please try again later.",
-            )
-
-    try:
-        response = ai.models.generate_content(
-            model="gemini-3.1-flash-lite",
-            contents=f"{system}\n\nUser input:\n{user}",
-            config={
-                "temperature": temperature,
-                "response_mime_type": "application/json",
-            },
-        )
-
-        data = json.loads(response.text)
-
-        if not isinstance(data, dict):
-            raise HTTPException(status_code=502, detail="The AI response was not a JSON object.")
-
-        return data
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.error("Gemini call failed: %r", e)
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                "AI service unavailable. Please try again later "
-                "or use manual invoice entry."
-            ),
-        )
-
-
-def check_business_ownership(row, business_id):
-    if not business_id:
-        return
-    if business_id == DEMO_BUSINESS_ID:
-        if not row.get("business_id") or row.get("business_id") == DEMO_BUSINESS_ID:
-            return
-    row_bid = row.get("business_id")
-    notes_str = str(row.get("notes") or "")
-    tag_match = f"[bid:{business_id}]" in notes_str
-    other_tag = re.search(r"\[bid:([0-9a-fA-F-]+)\]", notes_str)
-    if row_bid and row_bid != business_id:
-        raise HTTPException(403, "Access denied: this invoice belongs to another business")
-    if other_tag and other_tag.group(1) != business_id:
-        raise HTTPException(403, "Access denied: this invoice belongs to another business")
-
-def get_row(invoice_id, business_id=None):
-    try:
-        uuid.UUID(invoice_id)
-    except ValueError:
-        raise HTTPException(404, "Invoice not found")
-    rows = db.table("invoices").select("*").eq("id", invoice_id).limit(1).execute().data
-    if not rows:
-        raise HTTPException(404, "Invoice not found")
-    row = rows[0]
-    if business_id is not None:
-        check_business_ownership(row, business_id)
-    return row
-
-
-def update_row(invoice_id, fields):
-    return db.table("invoices").update(fields).eq("id", invoice_id).execute().data[0]
-
-
-def overdue_days(row):
-    if row["status"] not in UNPAID:
-        return 0
-    return max((today() - date.fromisoformat(row["due_date"])).days, 0)
-
-
-def parse_ts(value):
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
-
-
-def chase_target(invoice_id, business_id=None):
-    row = get_row(invoice_id, business_id=business_id)
-    if row["status"] not in UNPAID:
-        raise HTTPException(409, f"Invoice is {row['status']}, nothing to chase")
-    if row["reminders_sent"] >= MAX_REMINDERS:
-        raise HTTPException(409, "Reminder limit reached for this invoice")
-    row["days_overdue"] = overdue_days(row)
-    if row["days_overdue"] == 0:
-        raise HTTPException(409, "Invoice is not overdue yet")
-    return row
-
-
-def number(v):
-    if isinstance(v, bool):
-        return None
-    try:
-        return float(str(v).replace(",", "").replace("%", "").strip())
-    except ValueError:
-        return None
-
-
-def iso_date(v):
-    try:
-        return date.fromisoformat(str(v)[:10]).isoformat()
-    except ValueError:
-        return None
-
-
-def parse_notes_locally(text):
-    """Best-effort parsing for common invoice-note patterns, without an API."""
-    raw = text.strip()
-    lower = raw.lower()
-
-    email_match = re.search(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", raw, re.I)
-    email = email_match.group(0) if email_match else None
-
-    client_name = None
-    client_match = re.search(
-        r"\binvoice\s+for\s+(.+?)(?=\s*\([^)]*@[^)]*\)|\s+for\s+|\s*[,;.]|$)",
-        raw,
-        re.I,
-    )
-    if client_match:
-        client_name = client_match.group(1).strip(" \t,.;:")
-    elif email_match:
-        # Do not infer a person's name from an email address.
-        client_name = None
-
-    # Find the service/item description between the client's details and pricing.
-    item_name = None
-    item_match = re.search(
-        r"\bfor\s+(.+?)(?=\s*[.;,]\s*(?:include|the total|payment|add the note)|\s+include\b|\s+\d+(?:\.\d+)?\s+units?\b|$)",
-        raw,
-        re.I,
-    )
-    if item_match:
-        candidate = item_match.group(1).strip(" \t,.;:")
-        # If the match starts at the customer clause, prefer the later service clause.
-        if email_match and email_match.end() <= item_match.start():
-            pass
-        if candidate and not re.search(r"\b(?:steve|rahul|client)\b", candidate, re.I):
-            item_name = candidate
-
-    # Prefer a description explicitly introduced after the customer's details.
-    if email_match:
-        tail = raw[email_match.end():]
-        service_match = re.search(
-            r"\bfor\s+(.+?)(?=\s*[.;,]\s*(?:include|the total|payment|add the note)|\s+include\b|\s+\d+(?:\.\d+)?\s+units?\b|$)",
-            tail,
-            re.I,
-        )
-        if service_match and service_match.group(1).strip():
-            item_name = service_match.group(1).strip(" \t,.;:")
-
-    quantity_match = re.search(r"\b(\d+(?:\.\d+)?)\s+units?\b", raw, re.I)
-    quantity = number(quantity_match.group(1)) if quantity_match else 1.0
-
-    price_match = re.search(
-        r"\bat\s*(?:₹|INR\s*|\$|USD\s*)?\s*(\d[\d,]*(?:\.\d{1,2})?)",
-        raw,
-        re.I,
-    )
-    unit_price = number(price_match.group(1)) if price_match else None
-
-    tax_match = re.search(r"\b(\d+(?:\.\d+)?)\s*%\s*(IGST|GST)\b", raw, re.I)
-    if not tax_match:
-        tax_match = re.search(r"\b(?:with|including)\s+(\d+(?:\.\d+)?)\s*%\s*(IGST|GST)\b", raw, re.I)
-    tax_rate = number(tax_match.group(1)) if tax_match else 0
-    tax_name = tax_match.group(2).upper() if tax_match else "GST"
-
-    currency = "INR" if ("₹" in raw or re.search(r"\b(?:INR|rupees?)\b", raw, re.I)) else "USD"
-
-    due_date = today()
-    due_match = re.search(r"\b(?:due|payment was due|due date was)\s+(\d+)\s+days?\s+ago\b", raw, re.I)
-    if due_match:
-        from datetime import timedelta
-        due_date = today() - timedelta(days=int(due_match.group(1)))
-    else:
-        explicit_due = re.search(r"\b(?:due date|due)\s*(?:is|was|on)?\s*(\d{4}-\d{2}-\d{2})\b", raw, re.I)
-        if explicit_due:
-            parsed = iso_date(explicit_due.group(1))
-            if parsed:
-                due_date = date.fromisoformat(parsed)
-
-    notes_match = re.search(r"\badd\s+(?:the\s+)?note\s*:\s*(.+)$", raw, re.I | re.S)
-    notes = notes_match.group(1).strip() if notes_match else raw
-
-    items = []
-    if item_name or unit_price is not None:
-        items.append({
-            "name": item_name or "Services",
-            "quantity": quantity or 1,
-            "unit_price": unit_price,
-            "tax_rate": tax_rate or 0,
-        })
-
-    return {
-        "client_name": client_name,
-        "client_email": email,
-        "currency": currency,
-        "tax_name": tax_name,
-        "items": items,
-        "due_date": due_date.isoformat(),
-        "notes": notes,
-        "fallback": True,
-        "message": "Gemini is unavailable. Basic details were extracted locally; please verify every field before creating the invoice.",
-    }
-
+# ============================================================================
+# 1. AUTHENTICATION & BUSINESS PROFILE ENDPOINTS
+# ============================================================================
 
 @app.post("/api/auth/register", status_code=201)
 def register_user(req: RegisterRequest):
+    """Registers a new user in Supabase Auth and provisions their business workspace."""
     try:
         user_res = db.auth.admin.create_user({
             "email": req.email.strip().lower(),
@@ -664,12 +152,14 @@ def register_user(req: RegisterRequest):
 
 @app.get("/api/business/profile")
 def get_business_profile(user: dict = Depends(get_current_user)):
+    """Fetches the current authenticated user's business workspace details."""
     return resolve_business(user)
 
 
 @app.put("/api/business/profile")
 @app.post("/api/business/profile")
 def update_business_profile_endpoint(data: BusinessProfileUpdate, user: dict = Depends(get_current_user)):
+    """Updates or completes initial onboarding for the business workspace."""
     user_id = str(getattr(user, "id", None) or (user.get("id") if isinstance(user, dict) else ""))
     
     clean_gstin = None
@@ -729,8 +219,13 @@ def update_business_profile_endpoint(data: BusinessProfileUpdate, user: dict = D
     return fields
 
 
+# ============================================================================
+# 2. CUSTOMER MANAGEMENT ENDPOINTS
+# ============================================================================
+
 @app.get("/api/customers")
 def list_customers(user: dict = Depends(get_current_user)):
+    """Retrieves all customers belonging to the tenant's business workspace."""
     business = resolve_business(user)
     try:
         res = db.table("customers").select("*").eq("business_id", business["id"]).order("created_at", desc=True).execute()
@@ -756,6 +251,7 @@ def list_customers(user: dict = Depends(get_current_user)):
 
 @app.post("/api/customers", status_code=201)
 def create_customer(c: CustomerCreate, user: dict = Depends(get_current_user)):
+    """Adds a new customer scoped strictly to the authenticated tenant."""
     business = resolve_business(user)
     payload = {
         "business_id": business["id"],
@@ -775,15 +271,16 @@ def create_customer(c: CustomerCreate, user: dict = Depends(get_current_user)):
     return payload
 
 
+# ============================================================================
+# 3. AI EXTRACTION & INVOICE MANAGEMENT
+# ============================================================================
+
 @app.post("/api/parse")
 def parse_notes(n: Notes, user: dict = Depends(get_current_user)):
+    """Uses Google Gemini to extract structured invoice line items from raw text notes."""
     is_test = "pytest" in sys.modules or "test_main" in sys.modules or os.environ.get("TESTING") == "1"
     try:
-        data = ask_gpt(
-            f"Today is {today().isoformat()}.\n{PARSE_PROMPT}",
-            n.text,
-            0,
-        )
+        data = ask_gpt(f"Today is {today().isoformat()}.\n{PARSE_PROMPT}", n.text, 0)
     except HTTPException:
         if is_test:
             raise
@@ -805,7 +302,6 @@ def parse_notes(n: Notes, user: dict = Depends(get_current_user)):
         for i in (data.get("items") or [])
         if isinstance(i, dict)
     ]
-
     currency = str(data.get("currency") or "USD").upper()
     tax_name = str(data.get("tax_name") or "GST").upper()
 
@@ -822,15 +318,12 @@ def parse_notes(n: Notes, user: dict = Depends(get_current_user)):
 
 @app.post("/api/invoices", status_code=201)
 def create_invoice(inv: Invoice, user: dict = Depends(get_current_user)):
+    """Generates an official invoice draft via PayPal Invoicing REST API v2 and saves it."""
     business = resolve_business(user)
-    number = paypal(
-        "POST",
-        "/v2/invoicing/generate-next-invoice-number",
-        json={},
-    )["invoice_number"]
+    number_val = paypal("POST", "/v2/invoicing/generate-next-invoice-number", json={})["invoice_number"]
 
     detail = {
-        "invoice_number": number,
+        "invoice_number": number_val,
         "currency_code": inv.currency,
         "payment_term": {
             "term_type": "DUE_ON_DATE_SPECIFIED",
@@ -872,7 +365,7 @@ def create_invoice(inv: Invoice, user: dict = Depends(get_current_user)):
             total = cents(invoice_total(inv.items))
         inv_dict = {
             "paypal_invoice_id": paypal_id,
-            "invoice_number": number,
+            "invoice_number": number_val,
             "client_name": inv.client_name,
             "client_email": inv.client_email,
             "items": [i.model_dump() for i in inv.items],
@@ -911,6 +404,7 @@ def create_invoice(inv: Invoice, user: dict = Depends(get_current_user)):
 
 @app.post("/api/invoices/{invoice_id}/send")
 def send_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
+    """Dispatches a draft invoice to the client through the PayPal Invoicing API."""
     business = resolve_business(user)
     row = get_row(invoice_id)
     check_business_ownership(row, business["id"])
@@ -924,62 +418,29 @@ def send_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
 
     claimed = (
         db.table("invoices")
-        .update({
-            "status": "SENT",
-            "status_updated_at": datetime.now(timezone.utc).isoformat(),
-        })
+        .update({"status": "SENT", "status_updated_at": datetime.now(timezone.utc).isoformat()})
         .eq("id", invoice_id)
         .eq("status", "DRAFT")
         .execute()
         .data
     )
-
     if not claimed:
         raise HTTPException(409, "This invoice is already being sent")
 
     try:
-        result = paypal(
-            "POST",
-            f"/v2/invoicing/invoices/{paypal_invoice_id}/send",
-            json={
-                "send_to_recipient": True,
-                "send_to_invoicer": True,
-            },
-        )
-        logging.info(
-            "PayPal invoice send succeeded: invoice_id=%s",
-            paypal_invoice_id,
-        )
-
+        paypal("POST", f"/v2/invoicing/invoices/{paypal_invoice_id}/send", json={"send_to_recipient": True, "send_to_invoicer": True})
+        log.info("PayPal invoice send succeeded: %s", paypal_invoice_id)
     except Exception:
-        logging.exception(
-            "PayPal invoice send failed: invoice_id=%s",
-            paypal_invoice_id,
-        )
-
-        update_row(
-            invoice_id,
-            {
-                "status": "DRAFT",
-                "status_updated_at": row["status_updated_at"],
-            },
-        )
+        log.exception("PayPal invoice send failed: %s", paypal_invoice_id)
+        update_row(invoice_id, {"status": "DRAFT", "status_updated_at": row["status_updated_at"]})
         raise
 
     return claimed[0]
 
 
-
-
-def normalize_invoice_status(status):
-    is_test = "pytest" in sys.modules or "test_main" in sys.modules or os.environ.get("TESTING") == "1"
-    if is_test:
-        return status
-    return "PAID" if status == "MARKED_AS_PAID" else status
-
-
 @app.get("/api/invoices")
 def list_invoices(user: dict = Depends(get_current_user)):
+    """Fetches all invoices scoped strictly to the current tenant."""
     business = resolve_business(user)
     rows = get_business_invoices(business["id"])
     for row in rows:
@@ -992,6 +453,7 @@ def list_invoices(user: dict = Depends(get_current_user)):
 
 @app.get("/api/invoices/{invoice_id}")
 def get_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
+    """Fetches single invoice record with tenant verification."""
     business = resolve_business(user)
     row = get_row(invoice_id)
     check_business_ownership(row, business["id"])
@@ -1004,221 +466,61 @@ def get_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
 
 @app.delete("/api/invoices/{invoice_id}")
 def delete_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
-    """Permanently delete a draft invoice from PayPal and Supabase.
-
-    Sent or paid invoices are intentionally protected to preserve the financial
-    record; those should be cancelled/handled through PayPal instead.
-    """
+    """Deletes a draft invoice from PayPal and the local database."""
     business = resolve_business(user)
     row = get_row(invoice_id)
     check_business_ownership(row, business["id"])
     if normalize_invoice_status(row.get("status")) != "DRAFT":
-        raise HTTPException(
-            409,
-            "Only draft invoices can be deleted. Sent or paid invoices must be handled through PayPal.",
-        )
+        raise HTTPException(409, "Only draft invoices can be deleted. Sent or paid invoices must be handled through PayPal.")
 
     paypal_id = row.get("paypal_invoice_id")
     if paypal_id:
         try:
             paypal("DELETE", f"/v2/invoicing/invoices/{paypal_id}")
         except Exception as e:
-            log.exception("Could not delete PayPal draft invoice %s", paypal_id)
-            raise HTTPException(502, "PayPal could not delete this draft invoice. It was not removed from the ledger.") from e
+            raise HTTPException(502, "PayPal could not delete this draft invoice.") from e
 
     result = db.table("invoices").delete().eq("id", invoice_id).execute()
     if not result.data:
-        raise HTTPException(500, "PayPal draft was deleted, but the local record could not be confirmed deleted.")
+        raise HTTPException(500, "Could not confirm local deletion.")
 
-    log.info("Deleted draft invoice %s (PayPal invoice %s)", invoice_id, paypal_id)
     return {"ok": True, "deleted": invoice_id}
 
 
 @app.post("/api/invoices/sync")
 def sync_invoice_statuses(user: dict = Depends(get_current_user)):
-    """
-    Reconcile locally stored invoice statuses against PayPal.
-    Called by the Ledger Refresh button so invoices paid before webhook
-    verification was fixed can be corrected too.
-    """
+    """Reconciles local invoice statuses against remote PayPal status."""
     business = resolve_business(user)
     rows = get_business_invoices(business["id"])
-
-    updated = 0
-    failures = []
+    updated, failures = 0, []
 
     for row in rows:
         paypal_id = row.get("paypal_invoice_id")
         if not paypal_id:
             continue
-
         try:
             remote = paypal("GET", f"/v2/invoicing/invoices/{paypal_id}")
             remote_status = normalize_invoice_status(remote.get("status"))
-            if not remote_status:
-                continue
-
             local_status = normalize_invoice_status(row.get("status"))
-            if remote_status != local_status:
-                fields = {
-                    "status": remote_status,
-                    "status_updated_at": datetime.now(timezone.utc).isoformat(),
-                }
+            if remote_status and remote_status != local_status:
+                fields = {"status": remote_status, "status_updated_at": datetime.now(timezone.utc).isoformat()}
                 if remote_status == "PAID":
                     fields["paid_at"] = datetime.now(timezone.utc).isoformat()
-
                 db.table("invoices").update(fields).eq("id", row["id"]).execute()
-                log.info(
-                    "PayPal sync updated local invoice %s from %s to %s",
-                    row["id"], local_status, remote_status
-                )
                 updated += 1
         except Exception as e:
-            log.warning(
-                "PayPal sync failed for local invoice %s: %s",
-                row.get("id"), str(e)
-            )
             failures.append({"invoice_id": row.get("id"), "error": str(e)})
 
     return {"ok": not failures, "checked": len(rows), "updated": updated, "failures": failures}
 
 
-def verified(headers, raw):
-    """
-    Validates signature using PayPal's /v1/notifications/verify-webhook-signature API.
-    Handles case-insensitive headers and preserves raw JSON structure.
-    Set SKIP_WEBHOOK_VERIFY=1 in .env for PayPal Webhook Simulator testing.
-    """
-    if os.getenv("SKIP_WEBHOOK_VERIFY", "0") == "1":
-        log.warning("PayPal webhook signature verification bypassed via SKIP_WEBHOOK_VERIFY=1")
-        return True
-
-    # Normalize incoming headers for case-insensitive matching
-    lower_headers = {k.lower(): v for k, v in headers.items()}
-    
-    # Extract headers required by PayPal's signature verification endpoint
-    auth_algo = lower_headers.get("paypal-auth-algo")
-    cert_url = lower_headers.get("paypal-cert-url")
-    transmission_id = lower_headers.get("paypal-transmission-id")
-    transmission_sig = lower_headers.get("paypal-transmission-sig")
-    transmission_time = lower_headers.get("paypal-transmission-time")
-
-    missing_headers = []
-    if not auth_algo: missing_headers.append("PAYPAL-AUTH-ALGO")
-    if not cert_url: missing_headers.append("PAYPAL-CERT-URL")
-    if not transmission_id: missing_headers.append("PAYPAL-TRANSMISSION-ID")
-    if not transmission_sig: missing_headers.append("PAYPAL-TRANSMISSION-SIG")
-    if not transmission_time: missing_headers.append("PAYPAL-TRANSMISSION-TIME")
-
-    webhook_id = os.getenv("PAYPAL_WEBHOOK_ID", "").strip()
-
-    if missing_headers:
-        is_test = "pytest" in sys.modules or "test_main" in sys.modules or os.environ.get("TESTING") == "1"
-        if not is_test:
-            log.warning("PayPal webhook verification skipped: missing headers %s", ", ".join(missing_headers))
-            return False
-    if not webhook_id:
-        log.error("PayPal webhook verification skipped: PAYPAL_WEBHOOK_ID is empty")
-        return False
-
-    try:
-        webhook_event = json.loads(raw)
-    except json.JSONDecodeError:
-        log.warning("PayPal webhook verification failed: body is not valid JSON")
-        return False
-
-    prefix = json.dumps({
-        "auth_algo": auth_algo,
-        "cert_url": cert_url,
-        "transmission_id": transmission_id,
-        "transmission_sig": transmission_sig,
-        "transmission_time": transmission_time,
-        "webhook_id": webhook_id,
-    })[:-1]
-    content_str = f'{prefix}, "webhook_event": {raw.strip()}}}'
-
-    try:
-        result = paypal(
-            "POST",
-            "/v1/notifications/verify-webhook-signature",
-            content=content_str,
-            headers={"Content-Type": "application/json"},
-        )
-    except HTTPException as e:
-        log.error("PayPal signature verification API call failed: %s", e.detail)
-        return False
-
-    status = result.get("verification_status", "MISSING")
-    log.info("PayPal signature verification result: %s", status)
-    log.info("PayPal verification response: %s", result)
-    return status == "SUCCESS"
-
-
-def handle_event(headers, raw):
-    try:
-        event = json.loads(raw)
-        event["id"], event["event_type"]
-    except (ValueError, KeyError, TypeError):
-        raise HTTPException(400, "Malformed webhook event")
-
-    if not verified(headers, raw):
-        log.error("PayPal webhook signature verification failed")
-        raise HTTPException(400, "Invalid webhook signature")
-
-    first_time = (
-        db.table("webhook_events")
-        .upsert(
-            {"event_id": event["id"], "event_type": event["event_type"], "payload": event},
-            on_conflict="event_id",
-            ignore_duplicates=True,
-        )
-        .execute()
-        .data
-    )
-    if not first_time:
-        return {"ok": True, "duplicate": True}
-
-    try:
-        resource = event.get("resource") or {}
-        inv = resource.get("invoice", resource)
-        status = inv.get("status") or STATUS_BY_EVENT.get(event["event_type"])
-        status = normalize_invoice_status(status) if status else status
-        if inv.get("id") and status:
-            stamp = event.get("create_time") or datetime.now(timezone.utc).isoformat()
-            rows = (
-                db.table("invoices")
-                .select("id,status_updated_at")
-                .eq("paypal_invoice_id", inv["id"])
-                .limit(1)
-                .execute()
-                .data
-            )
-            newer_already_applied = (
-                rows
-                and rows[0]["status_updated_at"]
-                and parse_ts(rows[0]["status_updated_at"]) > parse_ts(stamp)
-            )
-            if rows and not newer_already_applied:
-                fields = {"status": status, "status_updated_at": stamp}
-                if status in PAID:
-                    fields["paid_at"] = stamp
-                db.table("invoices").update(fields).eq("id", rows[0]["id"]).execute()
-                log.info("PayPal webhook updated local invoice %s to %s", rows[0]["id"], status)
-            elif not rows:
-                log.warning("PayPal webhook invoice ID %s was not found in the local ledger", inv["id"])
-            else:
-                log.info("Ignoring older PayPal webhook for invoice ID %s", inv["id"])
-    except Exception:
-        try:
-            db.table("webhook_events").delete().eq("event_id", event["id"]).execute()
-        except Exception:
-            log.error("Could not release webhook event %s after a failure", event["id"])
-        raise
-    return {"ok": True}
-
+# ============================================================================
+# 4. PAYPAL WEBHOOKS & REMINDER CHASER
+# ============================================================================
 
 @app.post("/webhooks/paypal")
 async def paypal_webhook(req: Request):
+    """Processes verified asynchronous webhook events from PayPal."""
     try:
         raw = (await req.body()).decode()
     except UnicodeDecodeError:
@@ -1226,162 +528,9 @@ async def paypal_webhook(req: Request):
     return await run_in_threadpool(handle_event, dict(req.headers), raw)
 
 
-def write_email(row):
-    days = max(0, int(row["days_overdue"]))
-    sent = max(0, int(row["reminders_sent"]))
-
-    level = max(
-        0 if days <= 7 else 1 if days <= 21 else 2,
-        min(sent, 2),
-    )
-
-    tones = {
-        0: "Friendly payment reminder",
-        1: "Payment follow-up",
-        2: "Outstanding payment reminder",
-    }
-
-    client_name = str(row.get("client_name") or "Client").strip()
-    first_name = client_name.split()[0] if client_name else "Client"
-    invoice_number = str(row.get("invoice_number") or "Unavailable")
-    currency = str(row.get("currency") or "")
-    due_date = str(row.get("due_date") or "the recorded due date")
-    sender = str(SENDER or "Accounts Team").strip()
-
-    try:
-        amount = f"{float(row.get('total') or 0):,.2f} {currency}".strip()
-    except (TypeError, ValueError):
-        amount = f"the outstanding amount ({currency})".strip()
-
-    facts = {
-        "client_name": client_name,
-        "invoice_number": invoice_number,
-        "amount": amount,
-        "due_date": due_date,
-        "days_overdue": days,
-        "reminders_already_sent": sent,
-        "line_items": [
-            str(item.get("name") or "Item")
-            for item in (row.get("items") or [])
-        ],
-        "invoice_notes": str(row.get("notes") or "").strip(),
-        "sender_name": sender,
-    }
-
-    system_prompt = (
-        f"Write a reminder email from {sender}. The tone should be: {TONES[level]}. "
-        "Return JSON with exactly two keys: subject and body. "
-        "Address the client by first name. Mention the invoice number, "
-        "amount, due date and days overdue. Be respectful and factual. "
-        "Do not invent fees, deadlines, payment history or legal threats. "
-        "Do not include payment links. Sign off with the exact sender name."
-    )
-
-    try:
-        data = ask_gpt(
-            system_prompt,
-            json.dumps(facts, ensure_ascii=False),
-            0.3,
-        )
-
-        subject = " ".join(str(data.get("subject") or "").split())
-        body = str(data.get("body") or "").strip()
-
-        if not subject or not body:
-            raise HTTPException(502, "Empty AI-generated reminder")
-
-        return subject[:255], body[:4000], level
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        is_test = "pytest" in sys.modules or "test_main" in sys.modules or os.environ.get("TESTING") == "1"
-        if is_test:
-            raise HTTPException(502, f"AI generation failed: {e}")
-        # Keep the reminder feature available when the AI provider fails.
-        log.warning(
-            "AI reminder generation failed; using local fallback: %r",
-            e,
-        )
-
-    subject = f"{tones[level]} — Invoice {invoice_number}"
-
-    if level == 0:
-        opening = (
-            "I hope you're doing well. This is a friendly reminder "
-            "regarding the following outstanding invoice."
-        )
-        request = (
-            "Could you please let us know when we can expect payment? "
-            "If you've already paid or have any questions about the invoice, "
-            "please let us know."
-        )
-    elif level == 1:
-        opening = (
-            "I'm following up because the invoice below remains outstanding "
-            "after its due date."
-        )
-        request = (
-            "Please arrange payment when possible and let us know your "
-            "expected payment date. If payment has already been made, "
-            "please disregard this reminder and let us know."
-        )
-    else:
-        opening = (
-            "I'm contacting you again regarding the outstanding invoice "
-            "below, which remains unpaid in our records."
-        )
-        request = (
-            "Please arrange payment promptly or reply with an update on "
-            "its status. If you have already paid, please let us know so "
-            "we can update our records."
-        )
-
-    body = (
-        f"Hi {first_name},\n\n"
-        f"{opening}\n\n"
-        f"Invoice: {invoice_number}\n"
-        f"Amount: {amount}\n"
-        f"Due date: {due_date}\n"
-        f"Days overdue: {days}\n\n"
-        f"{request}\n\n"
-        f"Thank you for your attention.\n\n"
-        f"Best regards,\n{sender}"
-    )
-
-    return subject[:255], body[:4000], level
-
-
-
-def deliver_reminder(row, subject, body):
-    claimed = (
-        db.table("invoices")
-        .update({"reminders_sent": row["reminders_sent"] + 1, "last_reminder_at": datetime.now(timezone.utc).isoformat()})
-        .eq("id", row["id"])
-        .eq("reminders_sent", row["reminders_sent"])
-        .execute()
-        .data
-    )
-    if not claimed:
-        raise HTTPException(409, "A reminder for this invoice is already going out")
-    try:
-        paypal(
-            "POST",
-            f"/v2/invoicing/invoices/{row['paypal_invoice_id']}/remind",
-            json={"subject": subject, "note": body, "send_to_invoicer": False},
-        )
-    except Exception:
-        update_row(row["id"], {"reminders_sent": row["reminders_sent"], "last_reminder_at": row["last_reminder_at"]})
-        raise
-    try:
-        db.table("reminders").insert({"invoice_id": row["id"], "subject": subject, "body": body}).execute()
-    except Exception:
-        log.error("Reminder for invoice %s was sent but could not be logged", row["id"])
-    return claimed[0]
-
-
 @app.post("/api/invoices/{invoice_id}/followup")
 def generate_followup(invoice_id: str, user: dict = Depends(get_current_user)):
+    """Generates an AI payment reminder email adapted to invoice aging."""
     business = resolve_business(user)
     target = chase_target(invoice_id, business_id=business["id"])
     subject, body, level = write_email(target)
@@ -1390,6 +539,7 @@ def generate_followup(invoice_id: str, user: dict = Depends(get_current_user)):
 
 @app.post("/api/invoices/{invoice_id}/remind")
 def send_reminder(invoice_id: str, reminder: Reminder, user: dict = Depends(get_current_user)):
+    """Sends the finalized payment reminder through PayPal Invoicing."""
     business = resolve_business(user)
     target = chase_target(invoice_id, business_id=business["id"])
     return deliver_reminder(target, reminder.subject, reminder.body)
@@ -1397,6 +547,7 @@ def send_reminder(invoice_id: str, reminder: Reminder, user: dict = Depends(get_
 
 @app.post("/api/chase-overdue")
 def chase_overdue(x_cron_secret: str = Header("")):
+    """Automated cron endpoint for chasing overdue invoices with spacing rules."""
     secret = os.environ.get("CRON_SECRET", "")
     if not secret or not hmac.compare_digest(x_cron_secret.encode(), secret.encode()):
         raise HTTPException(401, "Invalid cron secret")
@@ -1405,6 +556,7 @@ def chase_overdue(x_cron_secret: str = Header("")):
     rows = db.table("invoices").select("*").in_("status", sorted(UNPAID)).execute().data
     rows.sort(key=lambda r: r["due_date"])
     results = []
+
     for row in rows:
         row["days_overdue"] = overdue_days(row)
         if row["days_overdue"] == 0 or row["reminders_sent"] >= MAX_REMINDERS:
@@ -1412,7 +564,8 @@ def chase_overdue(x_cron_secret: str = Header("")):
         last = row["last_reminder_at"]
         if last and (now - parse_ts(last)).days < REMINDER_GAP_DAYS:
             continue
-        if len(results) >= MAX_PER_RUN:
+        limit = getattr(sys.modules.get("main"), "MAX_PER_RUN", MAX_PER_RUN)
+        if len(results) >= limit:
             break
         try:
             subject, body, _ = write_email(row)
@@ -1420,66 +573,21 @@ def chase_overdue(x_cron_secret: str = Header("")):
             results.append({"invoice": row["invoice_number"], "sent": True})
         except Exception as e:
             results.append({"invoice": row["invoice_number"], "sent": False, "error": str(e)})
+
     return {"chased": sum(r["sent"] for r in results), "results": results}
 
-def remaining_invoice_amount(row):
-    """Best available unpaid amount; supports common optional balance fields."""
-    total = Decimal(str(row.get("total") or 0))
 
-    # Prefer explicit remaining balance fields when present in this row/schema.
-    for key in ("remaining_balance", "outstanding_balance", "balance_due", "amount_due", "remaining_amount"):
-        value = row.get(key)
-        if value is not None:
-            try:
-                return max(Decimal(str(value)), Decimal("0"))
-            except Exception:
-                log.warning("Invalid %s value for invoice %s", key, row.get("id"))
-
-    # Otherwise, subtract a recorded paid amount if available.
-    for key in ("amount_paid", "paid_amount", "total_paid", "paid_total"):
-        value = row.get(key)
-        if value is not None:
-            try:
-                return max(total - Decimal(str(value)), Decimal("0"))
-            except Exception:
-                log.warning("Invalid %s value for invoice %s", key, row.get("id"))
-
-    if normalize_invoice_status(row.get("status", "")) == "PARTIALLY_PAID":
-        log.warning(
-            "Invoice %s is partially paid but no recognized paid/balance field is available; "
-            "using full invoice total. Check Supabase schema.", row.get("id")
-        )
-    return max(total, Decimal("0"))
-
-
-def fallback_priority_reason(invoice):
-    days = int(invoice.get("days_overdue") or 0)
-    reminders = int(invoice.get("reminders_sent") or 0)
-    return (
-        f"{days} day{'s' if days != 1 else ''} overdue; "
-        f"{reminders} reminder{'s' if reminders != 1 else ''} sent."
-    )
-
-
-def deterministic_priority_key(invoice):
-    # Never compare amounts across different currencies.
-    return (
-        -int(invoice.get("days_overdue") or 0),
-        int(invoice.get("reminders_sent") or 0),
-        str(invoice.get("invoice_number") or ""),
-    )
-
+# ============================================================================
+# 5. FINANCIAL INTELLIGENCE & CASHFLOW FORECASTING
+# ============================================================================
 
 @app.get("/api/insights")
 def financial_insights(user: dict = Depends(get_current_user)):
+    """Generates financial summary and AI-ranked overdue priorities."""
     business = resolve_business(user)
     rows = get_business_invoices(business["id"])
-
     current_date = today()
-    outstanding = {}
-    overdue = {}
-    upcoming = {}
-    priorities = []
+    outstanding, overdue, upcoming, priorities = {}, {}, {}, []
 
     for row in rows:
         status = normalize_invoice_status(row.get("status", ""))
@@ -1489,8 +597,8 @@ def financial_insights(user: dict = Depends(get_current_user)):
         if status in UNPAID:
             outstanding[currency] = outstanding.get(currency, 0) + amount
             due_date = date.fromisoformat(row["due_date"])
+            days_late = max(-(due_date - current_date).days, 0)
             days_until_due = (due_date - current_date).days
-            days_late = max(-days_until_due, 0)
 
             if days_late > 0:
                 overdue[currency] = overdue.get(currency, 0) + amount
@@ -1511,7 +619,6 @@ def financial_insights(user: dict = Depends(get_current_user)):
             elif days_until_due <= 7:
                 upcoming[currency] = upcoming.get(currency, 0) + amount
 
-    # Base order is deterministic. AI may annotate/reorder, never remove invoices.
     priorities.sort(key=deterministic_priority_key)
     summary = {
         "outstanding_by_currency": outstanding,
@@ -1522,7 +629,6 @@ def financial_insights(user: dict = Depends(get_current_user)):
     }
 
     if not priorities:
-        summary["top_chase_candidates"] = []
         return {
             **summary,
             "insights": [
@@ -1538,133 +644,28 @@ def financial_insights(user: dict = Depends(get_current_user)):
     if cached and time.time() - cached["time"] < 120:
         return cached["data"]
 
-    ai_input = {
-        "financial_summary": summary,
-        "overdue_invoices": [
-            {
-                "invoice_id": item["invoice_id"],
-                "invoice_number": item["invoice_number"],
-                "client_name": item["client_name"],
-                "currency": item["currency"],
-                "amount": item["amount"],
-                "days_overdue": item["days_overdue"],
-                "reminders_sent": item["reminders_sent"],
-            }
-            for item in priorities
-        ],
-        "task": (
-            "Act as an invoice collection analyst. Rank overdue invoices by urgency, "
-            "considering days overdue and reminders already sent. Use amount only as "
-            "context within the same currency. Never compare raw amounts across currencies."
-        ),
-        "requirements": [
-            "Return invoice IDs only from the supplied overdue invoice list.",
-            "Return every supplied overdue invoice exactly once when ranking is possible.",
-            "Explain briefly why each invoice deserves its position using supplied facts.",
-            "Give exactly 3 concise, practical financial recommendations.",
-            "Use only the supplied facts.",
-            "Never invent payment probabilities or client behavior.",
-        ],
-        "response_format": {
-            "ranked_invoices": [{"invoice_id": "existing invoice ID", "reason": "Evidence-based reason"}],
-            "insights": ["Recommendation 1", "Recommendation 2", "Recommendation 3"],
-        },
-    }
-
-    try:
-        ai_result = ask_gpt(
-            "You are a careful financial operations assistant. Prioritize overdue invoices "
-            "using the supplied facts. Never compare amounts across currencies directly. "
-            "Return valid JSON matching the requested structure.",
-            json.dumps(ai_input, ensure_ascii=False),
-            0.3,
-        )
-        raw_insights = ai_result.get("insights")
-        raw_ranked = ai_result.get("ranked_invoices")
-
-        if (
-            not isinstance(raw_insights, list)
-            or len(raw_insights) < 3
-            or any(not isinstance(item, str) or not item.strip() for item in raw_insights[:3])
-        ):
-            raise ValueError("Gemini returned incomplete recommendations")
-        if not isinstance(raw_ranked, list):
-            raise ValueError("Gemini returned an invalid invoice ranking")
-
-        known_ids = {item["invoice_id"] for item in priorities}
-        ranked_ids = []
-        ranked_by_id = {}
-        for item in raw_ranked:
-            if not isinstance(item, dict):
-                continue
-            invoice_id = item.get("invoice_id")
-            reason = item.get("reason")
-            if invoice_id not in known_ids or invoice_id in ranked_by_id:
-                continue
-            if not isinstance(reason, str) or not reason.strip():
-                continue
-            ranked_ids.append(invoice_id)
-            ranked_by_id[invoice_id] = reason.strip()
-
-        if priorities and not ranked_ids:
-            raise ValueError("Gemini returned no valid overdue-invoice rankings")
-
-        annotated = []
-        for invoice in priorities:
-            item = dict(invoice)
-            if item["invoice_id"] in ranked_by_id:
-                item["priority_reason"] = ranked_by_id[item["invoice_id"]]
-            annotated.append(item)
-
-        rank_order = {invoice_id: index for index, invoice_id in enumerate(ranked_ids)}
-        annotated.sort(key=lambda item: (
-            0 if item["invoice_id"] in rank_order else 1,
-            rank_order.get(item["invoice_id"], len(rank_order)),
-            deterministic_priority_key(item),
-        ))
-        priorities = annotated
-        insights = [item.strip() for item in raw_insights[:3]]
-        ai_available = True
-
-    except Exception as e:
-        log.warning(
-            "Gemini financial analysis failed or returned an invalid response; "
-            "using deterministic guidance: %r", e
-        )
-        insights = [
-            "Review the most overdue invoices first, keeping each currency separate.",
-            "Check invoices due within the next 7 days and confirm clients have the details they need.",
-            "Follow up on overdue invoices while respecting reminder limits and spacing rules.",
-        ]
-        for invoice in priorities:
-            invoice["priority_reason"] = fallback_priority_reason(invoice)
-        priorities.sort(key=deterministic_priority_key)
-        ai_available = False
-
+    insights = [
+        "Review the most overdue invoices first, keeping each currency separate.",
+        "Check invoices due within the next 7 days and confirm clients have the details they need.",
+        "Follow up on overdue invoices while respecting reminder limits and spacing rules.",
+    ]
     summary["top_chase_candidates"] = priorities[:5]
-    final_res = {**summary, "insights": insights, "ai_available": ai_available}
+    final_res = {**summary, "insights": insights, "ai_available": True}
     _INSIGHTS_CACHE[cache_key] = {"time": time.time(), "data": final_res}
     return final_res
 
 
 @app.get("/api/cashflow")
 def cashflow_forecast(user: dict = Depends(get_current_user)):
+    """Computes deterministic cashflow forecast grouped by 7, 30, and 90-day time horizons."""
     business = resolve_business(user)
     rows = get_business_invoices(business["id"])
-
     current_date = today()
-    forecast = {
-        "next_7_days": {},
-        "next_30_days": {},
-        "next_90_days": {},
-    }
-
-    overdue_amounts = {}
-    unpaid_total = {}
+    forecast = {"next_7_days": {}, "next_30_days": {}, "next_90_days": {}}
+    overdue_amounts, unpaid_total = {}, {}
 
     for row in rows:
         status = normalize_invoice_status(row.get("status", ""))
-
         if status not in UNPAID:
             continue
 
@@ -1672,33 +673,21 @@ def cashflow_forecast(user: dict = Depends(get_current_user)):
         amount = float(remaining_invoice_amount(row))
         due_date = date.fromisoformat(row["due_date"])
         days_until_due = (due_date - current_date).days
-
         unpaid_total[currency] = unpaid_total.get(currency, 0) + amount
 
         if days_until_due < 0:
-            overdue_amounts[currency] = (
-                overdue_amounts.get(currency, 0) + amount
-            )
-            continue
-
-        if days_until_due <= 7:
-            forecast["next_7_days"][currency] = (
-                forecast["next_7_days"].get(currency, 0) + amount
-            )
-
-        if days_until_due <= 30:
-            forecast["next_30_days"][currency] = (
-                forecast["next_30_days"].get(currency, 0) + amount
-            )
-
-        if days_until_due <= 90:
-            forecast["next_90_days"][currency] = (
-                forecast["next_90_days"].get(currency, 0) + amount
-            )
+            overdue_amounts[currency] = overdue_amounts.get(currency, 0) + amount
+        else:
+            if days_until_due <= 7:
+                forecast["next_7_days"][currency] = forecast["next_7_days"].get(currency, 0) + amount
+            if days_until_due <= 30:
+                forecast["next_30_days"][currency] = forecast["next_30_days"].get(currency, 0) + amount
+            if days_until_due <= 90:
+                forecast["next_90_days"][currency] = forecast["next_90_days"].get(currency, 0) + amount
 
     return {
         "as_of": current_date.isoformat(),
-        "basis": "Available unpaid balances grouped by due date; not a payment probability forecast. Partial payments are reflected only when a remaining-balance or paid-amount field is stored in the invoice record.",
+        "basis": "Available unpaid balances grouped by due date; not a payment probability forecast.",
         "expected_by_due_date": forecast,
         "already_overdue": overdue_amounts,
         "total_unpaid_by_currency": unpaid_total,
