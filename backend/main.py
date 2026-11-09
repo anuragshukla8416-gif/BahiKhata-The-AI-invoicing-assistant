@@ -135,6 +135,14 @@ TEST_USERS = {}
 DEMO_USER_ID = "00000000-0000-0000-0000-000000000001"
 DEMO_BUSINESS_ID = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"bahikhata.business.{DEMO_USER_ID}"))
 
+_SCHEMA_CACHE = {
+    "has_businesses_table": True,
+    "has_invoices_bid": True,
+    "businesses_checked_at": 0.0,
+    "invoices_bid_checked_at": 0.0,
+}
+_INSIGHTS_CACHE = {}
+
 
 def get_current_user(authorization: str = Header(None)):
     is_test = "pytest" in sys.modules or "test_main" in sys.modules or os.environ.get("TESTING") == "1" or os.environ.get("SUPABASE_URL") == "http://x"
@@ -216,12 +224,21 @@ def resolve_business(user):
         }
 
     # 1. Look up in businesses table if it exists
-    try:
-        res = db.table("businesses").select("*").eq("owner_id", user_id).limit(1).execute()
-        if res.data:
-            return res.data[0]
-    except Exception as e:
-        log.debug("businesses table lookup skipped: %r", e)
+    now = time.time()
+    can_query_businesses = _SCHEMA_CACHE["has_businesses_table"] or (now - _SCHEMA_CACHE["businesses_checked_at"] > 300)
+    if can_query_businesses:
+        try:
+            res = db.table("businesses").select("*").eq("owner_id", user_id).limit(1).execute()
+            _SCHEMA_CACHE["has_businesses_table"] = True
+            _SCHEMA_CACHE["businesses_checked_at"] = now
+            if res.data:
+                return res.data[0]
+        except Exception as e:
+            err_str = str(e)
+            if "PGRST205" in err_str or "schema cache" in err_str:
+                _SCHEMA_CACHE["has_businesses_table"] = False
+                _SCHEMA_CACHE["businesses_checked_at"] = now
+            log.debug("businesses table lookup skipped: %r", e)
 
     # 2. Derive business workspace from metadata or default
     deterministic_bid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"bahikhata.business.{user_id}"))
@@ -248,15 +265,16 @@ def resolve_business(user):
         "onboarding_completed": bool(metadata.get("onboarding_completed", False)),
     }
 
-    # Attempt to insert into businesses table
-    try:
-        insert_data = dict(default_business)
-        insert_data.pop("onboarding_completed", None)
-        insert_res = db.table("businesses").insert(insert_data).execute()
-        if insert_res.data:
-            return insert_res.data[0]
-    except Exception:
-        pass
+    # Attempt to insert into businesses table if table exists
+    if _SCHEMA_CACHE["has_businesses_table"]:
+        try:
+            insert_data = dict(default_business)
+            insert_data.pop("onboarding_completed", None)
+            insert_res = db.table("businesses").insert(insert_data).execute()
+            if insert_res.data:
+                return insert_res.data[0]
+        except Exception:
+            pass
 
     return default_business
 
@@ -276,11 +294,25 @@ def get_business_invoices(business_id: str):
         except Exception as e:
             log.debug("Demo invoice query error: %r", e)
 
-    try:
-        res = db.table("invoices").select("*").eq("business_id", business_id).order("created_at", desc=True).limit(500).execute()
-        rows = res.data
-    except Exception as e:
-        log.debug("Direct business_id query failed, checking tags: %r", e)
+    can_query_bid = _SCHEMA_CACHE["has_invoices_bid"] or (time.time() - _SCHEMA_CACHE["invoices_bid_checked_at"] > 300)
+    if can_query_bid:
+        try:
+            res = db.table("invoices").select("*").eq("business_id", business_id).order("created_at", desc=True).limit(500).execute()
+            _SCHEMA_CACHE["has_invoices_bid"] = True
+            _SCHEMA_CACHE["invoices_bid_checked_at"] = time.time()
+            rows = res.data
+        except Exception as e:
+            err_str = str(e)
+            if "PGRST204" in err_str or "PGRST205" in err_str or "column" in err_str:
+                _SCHEMA_CACHE["has_invoices_bid"] = False
+                _SCHEMA_CACHE["invoices_bid_checked_at"] = time.time()
+            log.debug("Direct business_id query failed, checking tags: %r", e)
+            all_rows = db.table("invoices").select("*").order("created_at", desc=True).limit(500).execute().data
+            rows = [
+                r for r in all_rows
+                if r.get("business_id") == business_id or f"[bid:{business_id}]" in str(r.get("notes") or "")
+            ]
+    else:
         all_rows = db.table("invoices").select("*").order("created_at", desc=True).limit(500).execute().data
         rows = [
             r for r in all_rows
@@ -1489,6 +1521,23 @@ def financial_insights(user: dict = Depends(get_current_user)):
         "top_chase_candidates": priorities[:5],
     }
 
+    if not priorities:
+        summary["top_chase_candidates"] = []
+        return {
+            **summary,
+            "insights": [
+                "All client accounts are currently in good standing with zero overdue invoices.",
+                "Maintain healthy cash flow by continuing to send prompt payment reminders on upcoming dues.",
+                "Review upcoming 7-day receivables to ensure timely collection.",
+            ],
+            "ai_available": True,
+        }
+
+    cache_key = f"{business['id']}:" + ",".join(str(p.get("invoice_id") or "") for p in priorities)
+    cached = _INSIGHTS_CACHE.get(cache_key)
+    if cached and time.time() - cached["time"] < 120:
+        return cached["data"]
+
     ai_input = {
         "financial_summary": summary,
         "overdue_invoices": [
@@ -1593,7 +1642,9 @@ def financial_insights(user: dict = Depends(get_current_user)):
         ai_available = False
 
     summary["top_chase_candidates"] = priorities[:5]
-    return {**summary, "insights": insights, "ai_available": ai_available}
+    final_res = {**summary, "insights": insights, "ai_available": ai_available}
+    _INSIGHTS_CACHE[cache_key] = {"time": time.time(), "data": final_res}
+    return final_res
 
 
 @app.get("/api/cashflow")
