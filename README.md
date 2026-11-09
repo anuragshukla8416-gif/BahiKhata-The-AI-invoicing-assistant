@@ -10,7 +10,7 @@
 
 ---
 
-Welcome judges! **BahiKhata** (*traditional Indian ledger / bookkeeping record*) solves a massive friction point for freelancers, solo consultants, and SMBs: **spending hours manually writing invoices, chasing late payments, and reconciling payment statuses.**
+**BahiKhata** (*traditional Indian ledger / bookkeeping record*) solves a massive friction point for freelancers, solo consultants, and SMBs: **spending hours manually writing invoices, chasing late payments, and reconciling payment statuses.**
 
 ### 🎯 2-Minute Feature Walkthrough
 1. **Instant Demo Login:** Click the **"Demo Login"** button on the sign-in screen to enter an already-populated business workspace with active invoices, payment history, and overdue records.
@@ -172,17 +172,6 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Configure your `.env` variables:
-```env
-OPENAI_API_KEY=your_gemini_or_ai_key
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_KEY=your_supabase_service_role_key
-PAYPAL_CLIENT_ID=your_paypal_sandbox_client_id
-PAYPAL_SECRET=your_paypal_sandbox_secret
-PAYPAL_WEBHOOK_ID=your_webhook_id
-FRONTEND_ORIGIN=http://localhost:5173
-CRON_SECRET=super_secret_cron_key
-```
 
 Start the server:
 ```bash
