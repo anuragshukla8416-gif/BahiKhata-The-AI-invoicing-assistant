@@ -51,7 +51,7 @@ class BusinessProfileUpdate(BaseModel):
     gst_registered: bool = False
     gstin: str | None = None
     pan: str = Field(default="", max_length=20)
-    currency: str = Field(default="INR", pattern=r"^[A-Z]{3}$")
+    currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
     tax_name: str = Field(default="GST", pattern=r"^(GST|IGST)$")
     tax_rate: float = Field(default=18.0, ge=0, le=100)
 

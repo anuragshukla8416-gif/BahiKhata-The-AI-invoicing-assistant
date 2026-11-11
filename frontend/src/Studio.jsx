@@ -9,7 +9,7 @@ const inDays = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0,
 const blank = () => ({
   client_name: "",
   client_email: "",
-  currency: "INR",
+  currency: "USD",
   tax_name: "GST",
   items: [blankItem()],
   due_date: inDays(15),
@@ -403,19 +403,19 @@ export default function Studio() {
           <span className="converter-label">Currency Quick-Convert:</span>
           <button
             type="button"
-            className={`currency-pill ${form.currency === "INR" ? "active" : ""}`}
-            onClick={() => convertCurrency("INR")}
-            title="Convert line prices to Indian Rupees"
-          >
-            ₹ INR (₹86.5/$)
-          </button>
-          <button
-            type="button"
             className={`currency-pill ${form.currency === "USD" ? "active" : ""}`}
             onClick={() => convertCurrency("USD")}
             title="Convert line prices to US Dollars"
           >
             $ USD
+          </button>
+          <button
+            type="button"
+            className={`currency-pill ${form.currency === "INR" ? "active" : ""}`}
+            onClick={() => convertCurrency("INR")}
+            title="Convert line prices to Indian Rupees"
+          >
+            ₹ INR (₹86.5/$)
           </button>
         </div>
 

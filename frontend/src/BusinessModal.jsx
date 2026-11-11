@@ -41,7 +41,7 @@ export default function BusinessModal({
     gstin: user?.gstin || "",
     pan: user?.pan || "",
     website: user?.website || "",
-    currency: user?.currency || "INR",
+    currency: user?.currency || "USD",
     taxName: user?.taxName || "GST",
     taxRate: user?.taxRate || 18,
   });
@@ -465,8 +465,8 @@ export default function BusinessModal({
                     value={form.currency}
                     onChange={(e) => set("currency", e.target.value)}
                   >
-                    <option value="INR">INR (₹ Indian Rupee)</option>
                     <option value="USD">USD ($ US Dollar)</option>
+                    <option value="INR">INR (₹ Indian Rupee)</option>
                     <option value="EUR">EUR (€ Euro)</option>
                     <option value="GBP">GBP (£ British Pound)</option>
                   </select>
