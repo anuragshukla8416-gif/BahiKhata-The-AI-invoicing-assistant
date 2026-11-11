@@ -353,7 +353,7 @@ fieldset:disabled { opacity: .6; }
 .page-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
 .page-head h1 { font-size: 36px; }
 .page-head p { color: var(--muted); font-size: 15px; margin-top: 6px; }
-.grid-box { height: 480px; border: 1px solid var(--rule); background: var(--sheet); }
+.grid-box { min-height: 560px; height: 600px; border: 1px solid var(--rule); background: var(--sheet); }
 .empty { border: 1px solid var(--rule); background: var(--sheet); padding: 48px 24px; text-align: center; color: var(--muted); }
 .empty h2 { font-size: 24px; color: var(--ink); margin-bottom: 8px; }
 .empty .btn { margin-top: 18px; }
@@ -1014,7 +1014,7 @@ fieldset:disabled { opacity: .6; }
 .page-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
 .page-head h1 { font-size: 36px; }
 .page-head p { color: var(--muted); font-size: 15px; margin-top: 6px; }
-.grid-box { height: 480px; border: 1px solid var(--rule); background: var(--sheet); }
+.grid-box { min-height: 560px; height: 600px; border: 1px solid var(--rule); background: var(--sheet); }
 .empty { border: 1px solid var(--rule); background: var(--sheet); padding: 48px 24px; text-align: center; color: var(--muted); }
 .empty h2 { font-size: 24px; color: var(--ink); margin-bottom: 8px; }
 .empty .btn { margin-top: 18px; }
@@ -2823,7 +2823,7 @@ fieldset:disabled { opacity: .6; }
 .page-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
 .page-head h1 { font-size: 36px; }
 .page-head p { color: var(--muted); font-size: 15px; margin-top: 6px; }
-.grid-box { height: 480px; border: 1px solid var(--rule); background: var(--sheet); }
+.grid-box { min-height: 560px; height: 600px; border: 1px solid var(--rule); background: var(--sheet); }
 .empty { border: 1px solid var(--rule); background: var(--sheet); padding: 48px 24px; text-align: center; color: var(--muted); }
 .empty h2 { font-size: 24px; color: var(--ink); margin-bottom: 8px; }
 .empty .btn { margin-top: 18px; }

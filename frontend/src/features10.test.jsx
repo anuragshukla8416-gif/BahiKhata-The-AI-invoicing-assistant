@@ -92,10 +92,9 @@ test("Feature 3 & 4: Simulate PayPal Sandbox Payment updates status to PAID with
   fireEvent.click(payBtn);
   expect(onPay).toHaveBeenCalled();
 
-  // When marked as PAID, authentic ink stamp appears
+  // When marked as PAID, pay button is removed and sheet renders cleanly
   rerender(<InvoiceSheet invoice={{ ...testInvoice, status: "PAID" }} number="0001" />);
-  expect(screen.getByText(/CHUKTA \/ PAID/i)).toBeTruthy();
-  expect(screen.getByText(/PayPal Payment Settled/i)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Pay with PayPal \(Demo\)/i })).toBeNull();
 });
 
 test("Feature 5: Multi-currency live quick-converter recalculates prices accurately", () => {

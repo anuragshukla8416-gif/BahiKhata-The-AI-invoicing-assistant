@@ -117,6 +117,22 @@ function ActionCell({ data, context }) {
   );
 }
 
+function ClientCell({ data }) {
+  if (!data) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", lineHeight: 1.25, padding: "4px 0" }}>
+      <span style={{ fontWeight: 600, color: "#1A1A1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {data.client_name || "Unnamed client"}
+      </span>
+      {data.client_email && (
+        <span style={{ fontSize: 11, color: "#6A665E", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {data.client_email}
+        </span>
+      )}
+    </div>
+  );
+}
+
 const invoiceColumn = {
   field: "invoice_number",
   headerName: "Invoice",
@@ -130,9 +146,10 @@ const client = (narrow) => ({
   field: "client_name",
   headerName: "Client",
   flex: 1,
-  minWidth: narrow ? 96 : 140,
+  minWidth: narrow ? 110 : 160,
   sortable: true,
   filter: "agTextColumnFilter",
+  cellRenderer: ClientCell,
 });
 
 const amount = (narrow) => ({
@@ -172,9 +189,17 @@ const wideColumns = [
   client(false),
   amount(false),
   {
+    field: "created_at",
+    headerName: "Issued",
+    width: 120,
+    sortable: true,
+    filter: "agTextColumnFilter",
+    valueFormatter: (p) => (p.value ? longDate(String(p.value).split("T")[0]) : "—"),
+  },
+  {
     field: "due_date",
     headerName: "Due",
-    width: 130,
+    width: 120,
     sortable: true,
     filter: "agTextColumnFilter",
     valueFormatter: (p) => longDate(p.value),
@@ -183,7 +208,7 @@ const wideColumns = [
   {
     field: "reminders_sent",
     headerName: "Reminders",
-    width: 120,
+    width: 110,
     type: "rightAligned",
   },
   action,
@@ -434,11 +459,14 @@ export default function Ledger() {
             theme={theme}
             rowData={rows}
             columnDefs={narrow ? narrowColumns : wideColumns}
+            pagination={true}
+            paginationPageSize={15}
+            paginationPageSizeSelector={[10, 15, 25, 50, 100]}
             defaultColDef={{
               sortable: true,
               filter: true,
               resizable: true,
-              floatingFilter: true,
+              floatingFilter: false,
               minWidth: 90,
             }}
             getRowId={(p) => p.data.id}

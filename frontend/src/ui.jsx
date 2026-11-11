@@ -48,13 +48,6 @@ export function InvoiceSheet({ invoice, number, onSimulatePay }) {
 
   return (
     <article className="sheet" aria-label="Invoice preview">
-      {isPaid && (
-        <div className="paid-stamp" aria-label="Paid in full">
-          <span>✓ CHUKTA / PAID</span>
-          <small>PayPal Payment Settled</small>
-        </div>
-      )}
-
       <header className="s-head">
         <div>
           <div className="s-title">Invoice</div>

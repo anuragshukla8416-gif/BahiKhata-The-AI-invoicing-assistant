@@ -78,7 +78,7 @@ def resolve_business(user):
     user_email = str(getattr(user, "email", None) or (user.get("email") if isinstance(user, dict) else ""))
     metadata = getattr(user, "user_metadata", None) or (user.get("user_metadata") if isinstance(user, dict) else {}) or {}
 
-    if user_id == DEMO_USER_ID:
+    if user_id == DEMO_USER_ID or str(user_email).lower() in ("anurag@bahikhata.in", "testuser@bahikhata.in", "anuragshukla8416@gmail.com"):
         return {
             "id": DEMO_BUSINESS_ID,
             "owner_id": DEMO_USER_ID,
